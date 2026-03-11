@@ -40,6 +40,231 @@ local function trim(s)
     return string.match(s, "^%s*(.-)%s*$") or ""
 end
 
+-- ==============================================================================
+-- HEADLESS V5 AUTOFARM ENGINE (Triggered via _G.Settings)
+-- ==============================================================================
+local isHeadless = false
+if _G.Settings and type(_G.Settings) == "table" and _G.Settings.autofarm then
+    if _G.Settings.autofarm.Enabled == true then
+        isHeadless = true
+    end
+end
+
+if isHeadless then
+    print("[BZL Hub]: _G.Settings Detected. Running V5 Headless Autofarm.")
+    
+    local cfg = _G.Settings
+    local hitPosition = cfg.autofarm.position or "Up & down"
+    local RANDOM_SWITCH_SPEED = cfg.autofarm.speed or 1
+    local OFFSET_DISTANCE = cfg.autofarm.distance or 10
+    
+    local summonKeyStr = cfg.keybinds and cfg.keybinds.summon or "Q"
+    local attackKeyStrs = cfg.keybinds and cfg.keybinds.attack or {"E", "R", "Z", "X", "C", "V"}
+    
+    local SUMMON_KEY = KEY_MAP[summonKeyStr] or 0x51
+    local ATTACK_KEYS = {}
+    for _, str in ipairs(attackKeyStrs) do
+        if KEY_MAP[str] then table.insert(ATTACK_KEYS, KEY_MAP[str]) end
+    end
+    
+    local currentRandomMode = "Above"
+    local lastRandomChange = 0
+    local lastSummonTime = 0
+    local isAttacking = false
+    local lastKnownChar = nil
+    
+    local MIN_Y_LEVEL = -150 
+    local MAX_DISTANCE = 2500 
+    
+    local function isStandOut(c)
+        if not c then return false end
+        local a = c:GetAttribute("SummonedStand")
+        return (a and a ~= "" and a ~= false)
+    end
+    
+    local function forceSummon()
+        if keypress then
+            keypress(SUMMON_KEY)
+            task.wait(0.1 + (math.random() * 0.05))
+            keyrelease(SUMMON_KEY)
+        end
+        lastSummonTime = tick()
+    end
+
+    -- 1. UNIVERSAL AUTO-CLICKER (V5)
+    task.spawn(function()
+        local PLAY_SCALE_X = 0.5213541666666667
+        local PLAY_SCALE_Y = 0.6333002973240832
+        local RETRY_SCALE_X = 0.5494791666666666 
+        local RETRY_SCALE_Y = 0.6950 
+        local TOPBAR_OFFSET = 36 
+        
+        local function clickAtScale(scaleX, scaleY)
+            local camera = workspace.CurrentCamera
+            if not camera then return end
+            local viewport = camera.ViewportSize
+            local absX = viewport.X * scaleX
+            local absY = (viewport.Y * scaleY) + TOPBAR_OFFSET
+            if mousemoveabs then 
+                mousemoveabs(absX + math.random(-3, 3), absY + math.random(-3, 3)) 
+            end
+            task.wait(0.05 + (math.random() * 0.05))
+            if mouse1click then mouse1click() else 
+                if mouse1press then mouse1press(); task.wait(0.02 + math.random()*0.03); mouse1release() end
+            end
+        end
+        
+        local emptyTimer = 0
+        while true do
+            task.wait(0.5) 
+            local c = player.Character
+            local inGame = c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChildOfClass("Humanoid") and c.Humanoid.Health > 0
+            
+            if not inGame then
+                emptyTimer = 0
+                clickAtScale(PLAY_SCALE_X, PLAY_SCALE_Y)
+            else
+                local lf = workspace:FindFirstChild("Live")
+                local hasMobs = false
+                if lf then
+                    for _, v in ipairs(lf:GetChildren()) do
+                        if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
+                            local name = v.Name:lower()
+                            if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
+                                local mh = v:FindFirstChildOfClass("Humanoid")
+                                if mh and mh.Health > 0 then
+                                    hasMobs = true
+                                    break 
+                                end
+                            end
+                        end
+                    end
+                end
+                if not hasMobs then
+                    if emptyTimer == 0 then
+                        emptyTimer = tick()
+                    else
+                        local timeLeft = 2.5 - (tick() - emptyTimer)
+                        if timeLeft <= 0 then
+                            clickAtScale(RETRY_SCALE_X, RETRY_SCALE_Y)
+                            task.wait(4)
+                            emptyTimer = 0 
+                        end
+                    end
+                else
+                    emptyTimer = 0 
+                end
+            end
+        end
+    end)
+    
+    -- 2. V5 COMBAT & TARGETING LOOP
+    task.spawn(function()
+        while true do
+            task.wait(0.05)
+            local c = player.Character
+            if not c then continue end 
+            local root = c:FindFirstChild("HumanoidRootPart")
+            local hum = c:FindFirstChildOfClass("Humanoid")
+            if not root or not hum or hum.Health <= 0 then continue end
+            
+            if c ~= lastKnownChar then
+                lastKnownChar = c
+                task.wait(2.5) 
+                forceSummon()
+            end
+
+            if not isStandOut(c) and (tick() - lastSummonTime) > 3 then
+                forceSummon()
+            end
+
+            local lf = workspace:FindFirstChild("Live")
+            if lf then
+                local closestTarget = nil
+                local minDistance = 100000 
+                local myPos = root.Position
+                
+                for _, v in ipairs(lf:GetChildren()) do
+                    if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
+                        local name = v.Name:lower()
+                        -- V5 Specific logic: Targets any mob with a period (.) in front
+                        if string.sub(name, 1, 1) == "." then
+                            if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
+                                local mh = v:FindFirstChildOfClass("Humanoid")
+                                if mh and mh.Health > 0 then
+                                    local hrp = v.HumanoidRootPart
+                                    local tPos = hrp.Position
+                                    if tPos.Y >= MIN_Y_LEVEL then
+                                        local dx, dy, dz = myPos.X - tPos.X, myPos.Y - tPos.Y, myPos.Z - tPos.Z
+                                        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                                        if dist < minDistance and dist < MAX_DISTANCE then
+                                            minDistance = dist
+                                            closestTarget = hrp
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                
+                if closestTarget then
+                    local pos = closestTarget.Position
+                    local look = closestTarget.CFrame.LookVector
+                    local mode = hitPosition
+
+                    if mode == "Random" then
+                        if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
+                            local modes = {"Above", "Below", "Behind", "Middle"} 
+                            currentRandomMode = modes[math.random(1, 4)]
+                            lastRandomChange = tick()
+                        end
+                        mode = currentRandomMode
+                    elseif mode == "Up & down" then
+                        if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
+                            if currentRandomMode == "Above" then currentRandomMode = "Below" else currentRandomMode = "Above" end
+                            lastRandomChange = tick()
+                        end
+                        mode = currentRandomMode
+                    end
+
+                    if mode == "Above" then root.CFrame = CFrame.lookAt(pos + Vector3.new(0, OFFSET_DISTANCE, 0), pos)
+                    elseif mode == "Below" then root.CFrame = CFrame.lookAt(pos + Vector3.new(0, -OFFSET_DISTANCE, 0), pos)
+                    elseif mode == "Behind" then root.CFrame = CFrame.lookAt(pos - (look * OFFSET_DISTANCE), pos)
+                    elseif mode == "Middle" then root.CFrame = CFrame.lookAt(pos + (look * 2.5), pos)
+                    else root.CFrame = CFrame.lookAt(pos + Vector3.new(0, OFFSET_DISTANCE, 0), pos) end
+                    
+                    if not isAttacking then
+                        isAttacking = true
+                        task.spawn(function()
+                            if mouse1press then 
+                                mouse1press()
+                                task.wait(0.01 + (math.random() * 0.02)) 
+                                mouse1release() 
+                            end
+                            if keypress then
+                                for _, k in ipairs(ATTACK_KEYS) do 
+                                    keypress(k)
+                                    task.wait(0.01 + (math.random() * 0.01))
+                                    keyrelease(k)
+                                end
+                            end
+                            isAttacking = false
+                        end)
+                    end
+                end
+            end
+        end
+    end)
+    
+    -- END EXECUTION SO THE UI DOES NOT LOAD
+    return 
+end
+
+-- ==============================================================================
+-- BIZARRE LINEAGE HUB (Loads if _G.Settings.autofarm.Enabled is FALSE or Nil)
+-- ==============================================================================
+
 -- ==========================================
 -- CUSTOM CONFIG ENGINE (FOLDER SCANNER)
 -- ==========================================
@@ -53,12 +278,13 @@ if makefolder and isfolder then
     end
 end
 
+-- SEED UI DEFAULTS DIRECTLY FROM _G.SETTINGS IF AVAILABLE!
 local Config = {
-    HitPosition = "Above",
-    OffsetDistance = 10,
-    RandomSwitchSpeed = 2,
-    SummonKeyStr = "Q",
-    AttackKeyStrs = {"E", "R", "Z", "X", "C", "V"},
+    HitPosition = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.position) or "Above",
+    OffsetDistance = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.distance) or 10,
+    RandomSwitchSpeed = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.speed) or 2,
+    SummonKeyStr = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q",
+    AttackKeyStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E", "R", "Z", "X", "C", "V"},
     WhitelistedNames = {},
     TargetPlayer = "None"
 }
@@ -199,11 +425,6 @@ local function getGroupedMobs()
     if liveFolder then
         for _, v in ipairs(liveFolder:GetChildren()) do
             if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= player.Character then
-                
-                -- ==========================================
-                -- EXECUTOR-SAFE PLAYER FILTER
-                -- Blocks real players from showing in the NPC list
-                -- ==========================================
                 local isRealPlayer = false
                 for _, p in ipairs(Players:GetChildren()) do
                     if p:IsA("Player") and p.Character == v then
@@ -237,8 +458,6 @@ local function getGroupedMobs()
     end
     
     table.sort(newMobs)
-    
-    -- ALWAYS PIN "None" AT THE TOP
     table.insert(newMobs, 1, "None")
     
     local found = false
@@ -259,8 +478,6 @@ local function getPlayerNames()
         end
     end
     table.sort(list)
-    
-    -- ALWAYS PIN "None" AT THE TOP
     table.insert(list, 1, "None")
     
     local found = false
@@ -512,6 +729,81 @@ attackKeysDrop.OnChanged:Connect(function(indices, values)
     if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
+combatTab:addText({ text = " " })
+combatTab:addText({ text = "  [ AUTO-RECONNECT (V5) ]  " })
+local autoRecCheck = combatTab:addCheckbox({ text = "Auto-Play & Retry If Dead", default = false })
+local isAutoReconnectOn = false
+autoRecCheck.OnChanged:Connect(function(v) isAutoReconnectOn = v end)
+
+-- UI AUTO-CLICKER FOR V5 RECONNECT
+task.spawn(function()
+    local emptyTimer = 0
+    local PLAY_SCALE_X = 0.5213541666666667
+    local PLAY_SCALE_Y = 0.6333002973240832
+    local RETRY_SCALE_X = 0.5494791666666666 
+    local RETRY_SCALE_Y = 0.6950 
+    local TOPBAR_OFFSET = 36 
+    
+    local function clickAtScale(scaleX, scaleY)
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        local viewport = camera.ViewportSize
+        local absX = viewport.X * scaleX
+        local absY = (viewport.Y * scaleY) + TOPBAR_OFFSET
+        if mousemoveabs then 
+            mousemoveabs(absX + math.random(-3, 3), absY + math.random(-3, 3)) 
+        end
+        task.wait(0.05 + (math.random() * 0.05))
+        if mouse1click then mouse1click() else 
+            if mouse1press then mouse1press(); task.wait(0.02 + math.random()*0.03); mouse1release() end
+        end
+    end
+    
+    while true do
+        task.wait(0.5) 
+        if not isAutoReconnectOn then continue end
+        
+        local c = player.Character
+        local inGame = c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChildOfClass("Humanoid") and c.Humanoid.Health > 0
+        
+        if not inGame then
+            emptyTimer = 0
+            clickAtScale(PLAY_SCALE_X, PLAY_SCALE_Y)
+        else
+            local lf = workspace:FindFirstChild("Live")
+            local hasMobs = false
+            if lf then
+                for _, v in ipairs(lf:GetChildren()) do
+                    if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
+                        local name = v.Name:lower()
+                        if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
+                            local mh = v:FindFirstChildOfClass("Humanoid")
+                            if mh and mh.Health > 0 then
+                                hasMobs = true
+                                break 
+                            end
+                        end
+                    end
+                end
+            end
+            if not hasMobs then
+                if emptyTimer == 0 then
+                    emptyTimer = tick()
+                else
+                    local timeLeft = 2.5 - (tick() - emptyTimer)
+                    if timeLeft <= 0 then
+                        clickAtScale(RETRY_SCALE_X, RETRY_SCALE_Y)
+                        task.wait(4)
+                        emptyTimer = 0 
+                    end
+                end
+            else
+                emptyTimer = 0 
+            end
+        end
+    end
+end)
+
 -- ==========================================
 -- TAB: CONJURATION
 -- ==========================================
@@ -599,7 +891,6 @@ teleportToPlayerBtn.OnClick:Connect(function()
         if root then
             task.spawn(function()
                 for i = 1, 5 do
-                    -- UPSIDE DOWN FIX: Strips out the target's rotation and places you perfectly upright slightly above them.
                     root.CFrame = CFrame.new(targetPlr.Character.HumanoidRootPart.Position + Vector3.new(0, 3, 0))
                     task.wait(0.05)
                 end
@@ -728,9 +1019,6 @@ saveBtn.OnClick:Connect(function()
     end
 end)
 
--- ==========================================
--- NEW FEATURE: DELETE CONFIG BUTTON
--- ==========================================
 local deleteBtn = setTab:addButton({ text = "Delete Selected Config" })
 deleteBtn.OnClick:Connect(function()
     local targetFile = FOLDER_PATH .. "/" .. currentSelectedSlot .. ".txt"
@@ -844,7 +1132,6 @@ local function calculateTargetCFrame(targetRoot)
     local look = targetRoot.CFrame.LookVector
     local mode = hitPosition
 
-    -- Random Mode Logic
     if mode == "Random" then
         if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
             local modes = {"Above", "Below", "Behind", "Middle"} 
@@ -853,7 +1140,6 @@ local function calculateTargetCFrame(targetRoot)
         end
         mode = currentRandomMode
         
-    -- Up & Down Mode Logic
     elseif mode == "Up & down" then
         if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
             if currentRandomMode == "Above" then
@@ -1032,7 +1318,7 @@ local function findCombatTarget()
     local myPos = char and char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Position
 
     local closestTarget = nil
-    local minDistance = 150 -- FIXED: Prevents flying across the map to other people's bosses
+    local minDistance = 150 
 
     for _, v in ipairs(liveFolder:GetChildren()) do
         if not v or v == char or v.Name == player.Name then continue end
@@ -1085,7 +1371,6 @@ task.spawn(function()
                 
                 while not teleported and isConjFarmOn do
                     for i = 1, 5 do
-                        -- UPSIDE DOWN FIX: Keeps you perfectly upright in the middle of the mat
                         root.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
                         task.wait(0.1)
                     end
@@ -1099,9 +1384,6 @@ task.spawn(function()
                     end
                     task.wait(0.2) 
                     
-                    -- ==========================================
-                    -- CAMERA LOCK FOR YOGA MAT (Only when holding E)
-                    -- ==========================================
                     local camLockActive = true
                     task.spawn(function()
                         while camLockActive and isConjFarmOn do
@@ -1131,8 +1413,6 @@ task.spawn(function()
                     end
                     
                     if keyrelease then keyrelease(E_KEY) end
-                    
-                    -- Ditch camera lock the second E is dropped
                     camLockActive = false
                     
                     if not teleported then task.wait(0.2) end
@@ -1220,7 +1500,6 @@ task.spawn(function()
                 lastSummon = tick()
             end
             
-            -- Uses the UI Dropdown setting (Above/Below/Middle)
             r.CFrame = calculateTargetCFrame(target.hrp)
             
             if not attacking then
