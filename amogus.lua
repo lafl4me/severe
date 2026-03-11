@@ -650,7 +650,6 @@ refreshPlrBtn.OnClick:Connect(function()
     notify("Player list refreshed!")
 end)
 
-
 mobTab:addText({ text = " " })
 mobTab:addText({ text = "  [ AUTOMATION ]  " })
 
@@ -1095,8 +1094,8 @@ end)
 -- ==========================================
 setTab:addText({ text = " " }) 
 setTab:addText({ text = "  [ LIVE BOT STATE ]  " })
-liveState1 = setTab:addText({ text = "Position: Above | Dist: 10 | Delay: 2s" })
-liveState2 = setTab:addText({ text = "Stand Key: Q | Atk Keys: [E, R, Z, X, C, V]" })
+liveState1 = setTab:addText({ text = "Position: " .. tostring(Config.HitPosition) .. " | Dist: " .. tostring(Config.OffsetDistance) .. " | Delay: " .. tostring(Config.RandomSwitchSpeed) .. "s" })
+liveState2 = setTab:addText({ text = "Stand Key: " .. tostring(Config.SummonKeyStr) .. " | Atk Keys: [" .. table.concat(Config.AttackKeyStrs, ", ") .. "]" })
 liveState3 = setTab:addText({ text = "Whitelist: 0 | Target Mob: None" })
 liveState4 = setTab:addText({ text = "Target Player: None" })
 
@@ -1139,7 +1138,6 @@ local function calculateTargetCFrame(targetRoot)
             lastRandomChange = tick()
         end
         mode = currentRandomMode
-        
     elseif mode == "Up & down" then
         if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
             if currentRandomMode == "Above" then
