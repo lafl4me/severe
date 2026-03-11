@@ -425,6 +425,11 @@ local function getGroupedMobs()
     if liveFolder then
         for _, v in ipairs(liveFolder:GetChildren()) do
             if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= player.Character then
+                
+                -- ==========================================
+                -- EXECUTOR-SAFE PLAYER FILTER
+                -- Blocks real players from showing in the NPC list
+                -- ==========================================
                 local isRealPlayer = false
                 for _, p in ipairs(Players:GetChildren()) do
                     if p:IsA("Player") and p.Character == v then
@@ -458,6 +463,8 @@ local function getGroupedMobs()
     end
     
     table.sort(newMobs)
+    
+    -- ALWAYS PIN "None" AT THE TOP
     table.insert(newMobs, 1, "None")
     
     local found = false
@@ -478,6 +485,8 @@ local function getPlayerNames()
         end
     end
     table.sort(list)
+    
+    -- ALWAYS PIN "None" AT THE TOP
     table.insert(list, 1, "None")
     
     local found = false
@@ -650,6 +659,7 @@ refreshPlrBtn.OnClick:Connect(function()
     notify("Player list refreshed!")
 end)
 
+
 mobTab:addText({ text = " " })
 mobTab:addText({ text = "  [ AUTOMATION ]  " })
 
@@ -726,81 +736,6 @@ attackKeysDrop.OnChanged:Connect(function(indices, values)
         end
     end
     if _G.UpdateLiveState then _G.UpdateLiveState() end
-end)
-
-combatTab:addText({ text = " " })
-combatTab:addText({ text = "  [ AUTO-RECONNECT (V5) ]  " })
-local autoRecCheck = combatTab:addCheckbox({ text = "Auto-Play & Retry If Dead", default = false })
-local isAutoReconnectOn = false
-autoRecCheck.OnChanged:Connect(function(v) isAutoReconnectOn = v end)
-
--- UI AUTO-CLICKER FOR V5 RECONNECT
-task.spawn(function()
-    local emptyTimer = 0
-    local PLAY_SCALE_X = 0.5213541666666667
-    local PLAY_SCALE_Y = 0.6333002973240832
-    local RETRY_SCALE_X = 0.5494791666666666 
-    local RETRY_SCALE_Y = 0.6950 
-    local TOPBAR_OFFSET = 36 
-    
-    local function clickAtScale(scaleX, scaleY)
-        local camera = workspace.CurrentCamera
-        if not camera then return end
-        local viewport = camera.ViewportSize
-        local absX = viewport.X * scaleX
-        local absY = (viewport.Y * scaleY) + TOPBAR_OFFSET
-        if mousemoveabs then 
-            mousemoveabs(absX + math.random(-3, 3), absY + math.random(-3, 3)) 
-        end
-        task.wait(0.05 + (math.random() * 0.05))
-        if mouse1click then mouse1click() else 
-            if mouse1press then mouse1press(); task.wait(0.02 + math.random()*0.03); mouse1release() end
-        end
-    end
-    
-    while true do
-        task.wait(0.5) 
-        if not isAutoReconnectOn then continue end
-        
-        local c = player.Character
-        local inGame = c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChildOfClass("Humanoid") and c.Humanoid.Health > 0
-        
-        if not inGame then
-            emptyTimer = 0
-            clickAtScale(PLAY_SCALE_X, PLAY_SCALE_Y)
-        else
-            local lf = workspace:FindFirstChild("Live")
-            local hasMobs = false
-            if lf then
-                for _, v in ipairs(lf:GetChildren()) do
-                    if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
-                        local name = v.Name:lower()
-                        if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
-                            local mh = v:FindFirstChildOfClass("Humanoid")
-                            if mh and mh.Health > 0 then
-                                hasMobs = true
-                                break 
-                            end
-                        end
-                    end
-                end
-            end
-            if not hasMobs then
-                if emptyTimer == 0 then
-                    emptyTimer = tick()
-                else
-                    local timeLeft = 2.5 - (tick() - emptyTimer)
-                    if timeLeft <= 0 then
-                        clickAtScale(RETRY_SCALE_X, RETRY_SCALE_Y)
-                        task.wait(4)
-                        emptyTimer = 0 
-                    end
-                end
-            else
-                emptyTimer = 0 
-            end
-        end
-    end
 end)
 
 -- ==========================================
@@ -1094,8 +1029,8 @@ end)
 -- ==========================================
 setTab:addText({ text = " " }) 
 setTab:addText({ text = "  [ LIVE BOT STATE ]  " })
-liveState1 = setTab:addText({ text = "Position: " .. tostring(Config.HitPosition) .. " | Dist: " .. tostring(Config.OffsetDistance) .. " | Delay: " .. tostring(Config.RandomSwitchSpeed) .. "s" })
-liveState2 = setTab:addText({ text = "Stand Key: " .. tostring(Config.SummonKeyStr) .. " | Atk Keys: [" .. table.concat(Config.AttackKeyStrs, ", ") .. "]" })
+liveState1 = setTab:addText({ text = "Position: Above | Dist: 10 | Delay: 2s" })
+liveState2 = setTab:addText({ text = "Stand Key: Q | Atk Keys: [E, R, Z, X, C, V]" })
 liveState3 = setTab:addText({ text = "Whitelist: 0 | Target Mob: None" })
 liveState4 = setTab:addText({ text = "Target Player: None" })
 
@@ -1131,6 +1066,7 @@ local function calculateTargetCFrame(targetRoot)
     local look = targetRoot.CFrame.LookVector
     local mode = hitPosition
 
+    -- Random Mode Logic
     if mode == "Random" then
         if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
             local modes = {"Above", "Below", "Behind", "Middle"} 
@@ -1138,6 +1074,8 @@ local function calculateTargetCFrame(targetRoot)
             lastRandomChange = tick()
         end
         mode = currentRandomMode
+        
+    -- Up & Down Mode Logic
     elseif mode == "Up & down" then
         if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
             if currentRandomMode == "Above" then
