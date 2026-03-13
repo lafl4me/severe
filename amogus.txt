@@ -62,18 +62,18 @@ if isHeadless then
     print("[BZL Hub]: _G.Settings Detected. Running V5 Headless Autofarm.")
     
     local cfg = _G.Settings
-    local hitPosition = if cfg.autofarm.position then cfg.autofarm.position else "Up & down"
-    local RANDOM_SWITCH_SPEED = if cfg.autofarm.speed then cfg.autofarm.speed else 1
-    local OFFSET_DISTANCE = if cfg.autofarm.distance then cfg.autofarm.distance else 10
+    local hitPosition = cfg.autofarm.position or "Up & down"
+    local RANDOM_SWITCH_SPEED = cfg.autofarm.speed or 1
+    local OFFSET_DISTANCE = cfg.autofarm.distance or 10
     
-    local rawSummonStr = if cfg.keybinds and cfg.keybinds.summon then cfg.keybinds.summon else "Q"
-    local rawAttackStrs = if cfg.keybinds and cfg.keybinds.attack then cfg.keybinds.attack else {"E", "R", "Z", "X", "C", "V"}
+    local rawSummonStr = cfg.keybinds and cfg.keybinds.summon or "Q"
+    local rawAttackStrs = cfg.keybinds and cfg.keybinds.attack or {"E", "R", "Z", "X", "C", "V"}
     
     local summonKeyStr = cleanKey(rawSummonStr)
     local attackKeyStrs = {}
     for _, k in ipairs(rawAttackStrs) do table.insert(attackKeyStrs, cleanKey(k)) end
     
-    local SUMMON_KEY = if KEY_MAP[summonKeyStr] then KEY_MAP[summonKeyStr] else 0x51
+    local SUMMON_KEY = KEY_MAP[summonKeyStr] or 0x51
     local ATTACK_KEYS = {}
     for _, str in ipairs(attackKeyStrs) do
         if KEY_MAP[str] then table.insert(ATTACK_KEYS, KEY_MAP[str]) end
@@ -122,11 +122,7 @@ if isHeadless then
             end
             task.wait(0.05 + (math.random() * 0.05))
             if mouse1click then mouse1click() else 
-                if mouse1press then 
-                    mouse1press()
-                    task.wait(0.02 + math.random()*0.03)
-                    mouse1release() 
-                end
+                if mouse1press then mouse1press(); task.wait(0.02 + math.random()*0.03); mouse1release() end
             end
         end
         
@@ -203,6 +199,7 @@ if isHeadless then
                 for _, v in ipairs(lf:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
                         local name = v.Name:lower()
+                        -- V5 Specific logic: Targets any mob with a period (.) in front
                         if string.sub(name, 1, 1) == "." then
                             if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
                                 local mh = v:FindFirstChildOfClass("Humanoid")
@@ -272,13 +269,17 @@ if isHeadless then
         end
     end)
     
+    -- END EXECUTION SO THE UI DOES NOT LOAD
     return 
 end
 
 -- ==============================================================================
--- BIZARRE LINEAGE HUB
+-- BIZARRE LINEAGE HUB (Loads if _G.Settings.autofarm.Enabled is FALSE or Nil)
 -- ==============================================================================
 
+-- ==========================================
+-- CUSTOM CONFIG ENGINE (FOLDER SCANNER)
+-- ==========================================
 local FOLDER_PATH = "BZL"
 local SLOT_COUNT = 6
 local currentSelectedSlot = "Config 1"
@@ -289,16 +290,17 @@ if makefolder and isfolder then
     end
 end
 
-local rawUiSummonStr = if _G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon then _G.Settings.keybinds.summon else "Q"
-local rawUiAttackStrs = if _G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack then _G.Settings.keybinds.attack else {"E", "R", "Z", "X", "C", "V"}
+-- SEED UI DEFAULTS DIRECTLY FROM _G.SETTINGS IF AVAILABLE!
+local rawUiSummonStr = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q"
+local rawUiAttackStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E", "R", "Z", "X", "C", "V"}
 
 local cleanedUiAttackStrs = {}
 for _, k in ipairs(rawUiAttackStrs) do table.insert(cleanedUiAttackStrs, cleanKey(k)) end
 
 local Config = {
-    HitPosition = if _G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.position then _G.Settings.autofarm.position else "Above",
-    OffsetDistance = if _G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.distance then _G.Settings.autofarm.distance else 10,
-    RandomSwitchSpeed = if _G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.speed then _G.Settings.autofarm.speed else 2,
+    HitPosition = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.position) or "Above",
+    OffsetDistance = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.distance) or 10,
+    RandomSwitchSpeed = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.speed) or 2,
     SummonKeyStr = cleanKey(rawUiSummonStr),
     AttackKeyStrs = cleanedUiAttackStrs,
     WhitelistedNames = {},
@@ -341,6 +343,7 @@ local function DeserializeConfig(str)
     return cfg
 end
 
+-- AUTO-LOAD SYSTEM
 local AutoLoadedName = nil
 for i = 1, SLOT_COUNT do
     local baseName = "Config " .. i
@@ -362,6 +365,9 @@ if not Config.RandomSwitchSpeed then Config.RandomSwitchSpeed = 2 end
 if not Config.WhitelistedNames then Config.WhitelistedNames = {} end
 if not Config.TargetPlayer then Config.TargetPlayer = "None" end
 
+-- ==========================================
+-- GLOBAL HUB STATE
+-- ==========================================
 local isLobbyFarmOn = false
 local isConjFarmOn = false
 local isMobFarmOn = false
@@ -371,9 +377,6 @@ local currentRandomMode = "Above"
 local lastRandomChange = 0
 local OFFSET_DISTANCE = Config.OffsetDistance
 local RANDOM_SWITCH_SPEED = Config.RandomSwitchSpeed
-
--- ADDED MISSING SCAN_SPEED
-local SCAN_SPEED = 0.1 
 
 local MIN_Y_LEVEL = -150 
 local MAX_DISTANCE = 2500 
@@ -385,7 +388,7 @@ local A_KEY = 0x41
 local D_KEY = 0x44
 local ONE_KEY = 0x31
 
-local SUMMON_KEY = if KEY_MAP[Config.SummonKeyStr] then KEY_MAP[Config.SummonKeyStr] else 0x51
+local SUMMON_KEY = KEY_MAP[Config.SummonKeyStr] or 0x51
 local ATTACK_KEYS = {}
 for _, str in ipairs(Config.AttackKeyStrs) do
     if KEY_MAP[str] then table.insert(ATTACK_KEYS, KEY_MAP[str]) end
@@ -401,6 +404,9 @@ local function getDistance(pos1: Vector3, pos2: Vector3)
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 end
 
+-- ==========================================
+-- ROBUST WHITELIST CHECKER
+-- ==========================================
 local function isWhitelisted(entity)
     if not entity then return false end
     local entName = string.lower(entity.Name)
@@ -409,8 +415,10 @@ local function isWhitelisted(entity)
         if wName == "" then continue end
         local lowerW = string.lower(wName)
         
+        -- Direct Match
         if entName == lowerW then return true end
         
+        -- Deep Player Verification
         for _, p in ipairs(Players:GetChildren()) do
             if p:IsA("Player") then
                 if string.lower(p.Name) == lowerW or string.lower(p.DisplayName) == lowerW then
@@ -424,6 +432,9 @@ local function isWhitelisted(entity)
     return false
 end
 
+-- ==========================================
+-- DATA FETCHERS
+-- ==========================================
 local function getGroupedMobs()
     local counts = {}
     local bases = {}
@@ -506,6 +517,9 @@ local function UpdateUIElement(element, value)
     end)
 end
 
+-- ==========================================
+-- UI INITIALIZATION & CUSTOM THEME (OLED SAFE)
+-- ==========================================
 local bytecode = game:HttpGet("https://github.com/misterzeee/SevereUiLib/raw/refs/heads/main/MainByteCode.lua")
 local func = luau.load(bytecode)
 func()
@@ -534,6 +548,9 @@ local conjTab   = win:addTab("Conjuration")
 local tpTab     = win:addTab("Teleports")
 local setTab    = win:addTab("Config")
 
+-- ==========================================
+-- TAB: RANDOMIZED KILLING 
+-- ==========================================
 lobbyTab:addText({ text = "  [ RANDOMIZED KILLING ]  " })
 
 local lobbyCheck = lobbyTab:addCheckbox({ text = "Enable Autofarm", default = false })
@@ -580,7 +597,7 @@ local whitelistDrop = lobbyTab:addDropdown({
 
 whitelistDrop.OnChanged:Connect(function(val1, val2)
     Config.WhitelistedNames = {}
-    local list = if type(val2) == "table" then val2 else (if type(val1) == "table" then val1 else {val1})
+    local list = type(val2) == "table" and val2 or (type(val1) == "table" and val1 or {val1})
     
     for _, v in pairs(list) do
         if type(v) == "string" and v ~= "" then 
@@ -602,6 +619,9 @@ refreshWlBtn.OnClick:Connect(function()
     notify("Players list refreshed!")
 end)
 
+-- ==========================================
+-- TAB: SPECIFIC MOB & PLAYER (TARGET)
+-- ==========================================
 mobTab:addText({ text = "  [ ENTITY SELECTION ]  " })
 
 local initialMobs = getGroupedMobs()
@@ -648,18 +668,19 @@ refreshPlrBtn.OnClick:Connect(function()
     notify("Player list refreshed!")
 end)
 
+
 mobTab:addText({ text = " " })
 mobTab:addText({ text = "  [ AUTOMATION ]  " })
 
 local mobCheck = mobTab:addCheckbox({ text = "Enable Target Farm", default = false })
 mobCheck.OnChanged:Connect(function(v)
     isMobFarmOn = v
-    if v then 
-        isLobbyFarmOn = false;
-        isConjFarmOn = false 
-    end
+    if v then isLobbyFarmOn = false; isConjFarmOn = false end
 end)
 
+-- ==========================================
+-- TAB: FARM SETUP (Positions & Keybinds)
+-- ==========================================
 combatTab:addText({ text = "  [ AUTOFARM POSITION ]  " })
 combatTab:addText({ text = "⚠ UI Limitation: Sliders do not visually update" })
 combatTab:addText({ text = "when you load a saved config file." })
@@ -726,6 +747,9 @@ attackKeysDrop.OnChanged:Connect(function(indices, values)
     if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
+-- ==========================================
+-- TAB: CONJURATION
+-- ==========================================
 conjTab:addText({ text = "  [ CONJURATION FARM ]  " })
 conjTab:addText({ text = "⚠ Note: When running this script be near the gym." })
 
@@ -733,11 +757,13 @@ local conjCheck = conjTab:addCheckbox({ text = "Enable Farming", default = false
 conjCheck.OnChanged:Connect(function(v)
     isConjFarmOn = v
     if v then 
-        isLobbyFarmOn = false;
-        isMobFarmOn = false 
+        isLobbyFarmOn = false; isMobFarmOn = false 
     end
 end)
 
+-- ==========================================
+-- TAB: TELEPORTS
+-- ==========================================
 tpTab:addText({ text = "  [ MAP LOCATIONS ]  " })
 
 local tpLocations = {
@@ -819,6 +845,9 @@ teleportToPlayerBtn.OnClick:Connect(function()
     end
 end)
 
+-- ==========================================
+-- TAB: CONFIGURATION & SAVING
+-- ==========================================
 setTab:addText({ text = "  [ DATA MANAGER ]  " })
 
 local function getSlotsAndCount()
@@ -850,14 +879,14 @@ local configDrop = setTab:addDropdown({
     defaultIndex = dropDefaultIdx 
 })
 configDrop.OnChanged:Connect(function(val)
-    local strVal = if type(val) == "table" then val[1] else tostring(val)
+    local strVal = type(val) == "table" and val[1] or tostring(val)
     local parsed = string.match(strVal, "^(Config %d+)")
     if parsed then
         currentSelectedSlot = parsed
     end
 end)
 
-local configStatus = setTab:addText({ text = (if AutoLoadedName then ("Status: Auto-Loaded " .. AutoLoadedName) else "Status: Idle") })
+local configStatus = setTab:addText({ text = (AutoLoadedName and ("Status: Auto-Loaded " .. AutoLoadedName) or "Status: Idle") })
 local configCount = setTab:addText({ text = "Found " .. initialCount .. " configs in folder." })
 
 local function refreshConfigUI()
@@ -870,6 +899,7 @@ local function refreshConfigUI()
     pcall(function() configCount:setText("Found " .. newCount .. " configs in folder.") end)
 end
 
+-- LIVE STATE REFERENCES (Bottom of Config)
 local liveState1, liveState2, liveState3, liveState4
 
 _G.UpdateLiveState = function()
@@ -962,6 +992,7 @@ loadBtn.OnClick:Connect(function()
             if not Config.WhitelistedNames then Config.WhitelistedNames = {} end
             if not Config.TargetPlayer then Config.TargetPlayer = "None" end
             
+            -- Push Loaded Settings
             hitPosition = Config.HitPosition
             OFFSET_DISTANCE = Config.OffsetDistance
             RANDOM_SWITCH_SPEED = Config.RandomSwitchSpeed
@@ -975,6 +1006,7 @@ loadBtn.OnClick:Connect(function()
             
             if _G.UpdateLiveState then _G.UpdateLiveState() end
             
+            -- Attempt visual sync 
             UpdateUIElement(posDrop, Config.HitPosition)
             UpdateUIElement(distSlider, Config.OffsetDistance)
             UpdateUIElement(randSpeedSlider, Config.RandomSwitchSpeed)
@@ -1001,6 +1033,9 @@ refreshCfgBtn.OnClick:Connect(function()
     notify("Config list refreshed!")
 end)
 
+-- ==========================================
+-- LIVE BOT STATE MONITOR
+-- ==========================================
 setTab:addText({ text = " " }) 
 setTab:addText({ text = "  [ LIVE BOT STATE ]  " })
 liveState1 = setTab:addText({ text = "Position: " .. tostring(Config.HitPosition) .. " | Dist: " .. tostring(Config.OffsetDistance) .. " | Delay: " .. tostring(Config.RandomSwitchSpeed) .. "s" })
@@ -1017,6 +1052,9 @@ if AutoLoadedName then
     end)
 end
 
+-- ==========================================
+-- SHARED COMBAT HELPERS 
+-- ==========================================
 local function isStandOut(char)
     if not char then return false end
     local standAttr = char:GetAttribute("SummonedStand")
@@ -1037,6 +1075,7 @@ local function calculateTargetCFrame(targetRoot)
     local look = targetRoot.CFrame.LookVector
     local mode = hitPosition
 
+    -- Random Mode Logic
     if mode == "Random" then
         if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
             local modes = {"Above", "Below", "Behind", "Middle"} 
@@ -1044,6 +1083,8 @@ local function calculateTargetCFrame(targetRoot)
             lastRandomChange = tick()
         end
         mode = currentRandomMode
+        
+    -- Up & Down Mode Logic
     elseif mode == "Up & down" then
         if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
             if currentRandomMode == "Above" then
@@ -1307,9 +1348,9 @@ task.spawn(function()
                         keypress(E_KEY) 
                     end
                     
-                    -- ONLY THIS TIMER WAS CHANGED FOR THE YOGA MAT TP FIX
-                    while tick() - startTime < 6.5 and isConjFarmOn do
-                        task.wait(SCAN_SPEED)
+                    -- Wait condition updated to 5.5s timeout & removed undefined SCAN_SPEED
+                    while tick() - startTime < 5.5 and isConjFarmOn do
+                        task.wait(0.1) 
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                         if currentHrp and getDistance(currentHrp.Position, startPos) >= 40 then
                             teleported = true
@@ -1370,7 +1411,7 @@ task.spawn(function()
                             break
                         end
                         
-                        -- ONLY THIS TIMER WAS CHANGED FOR THE ARENA TP FIX
+                        -- Match the wait scale of Phase 1 to permit enough loading time
                         if tick() - startTime > 8.5 then break end
                     end
                     
@@ -1389,14 +1430,14 @@ task.spawn(function()
         local target = nil
         while not target and isConjFarmOn do
             target = findCombatTarget()
-            task.wait(SCAN_SPEED)
+            task.wait(0.1) -- Removed undefined SCAN_SPEED
         end
         
         local lastSummon = 0
         local attacking = false
         
         while target and target.hum.Health > 0 and isConjFarmOn do
-            task.wait(SCAN_SPEED)
+            task.wait(0.05) -- Removed undefined SCAN_SPEED
             local c = player.Character
             local r = c and c:FindFirstChild("HumanoidRootPart")
             if not r or not c:FindFirstChild("Humanoid") or c.Humanoid.Health <= 0 then break end
