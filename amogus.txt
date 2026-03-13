@@ -10,14 +10,9 @@ while not player do
     player = Players.LocalPlayer
 end
 
+-- Pure API Console Logging (No Roblox UI elements)
 local function notify(text)
-    pcall(function()
-        if send_notification then
-            send_notification(text)
-        else
-            print("[Notification]: " .. text)
-        end
-    end)
+    print("[BZL Hub]: " .. text)
 end
 
 -- ==========================================
@@ -60,6 +55,7 @@ end
 
 if isHeadless then
     print("[BZL Hub]: _G.Settings Detected. Running V5 Headless Autofarm.")
+    notify("Headless Farm Started! Press [F4] to Pause/Resume.")
     
     local cfg = _G.Settings
     local hitPosition = cfg.autofarm.position or "Up & down"
@@ -87,6 +83,44 @@ if isHeadless then
     
     local MIN_Y_LEVEL = -150 
     local MAX_DISTANCE = 2500 
+    
+    local isFarmPaused = false
+    local toggleDebounce = false
+
+    -- EXECUTOR-SAFE F4 TOGGLE LOOP
+    task.spawn(function()
+        while true do
+            task.wait(0.05)
+            local isPressed = false
+            
+            pcall(function()
+                if getpressedkeys then
+                    local keys = getpressedkeys()
+                    for _, key in pairs(keys) do
+                        local kStr = tostring(key)
+                        if string.find(kStr, "F4") then
+                            isPressed = true
+                            break
+                        end
+                    end
+                end
+            end)
+            
+            if isPressed then
+                if not toggleDebounce then
+                    toggleDebounce = true
+                    isFarmPaused = not isFarmPaused
+                    if isFarmPaused then
+                        notify("Autofarm PAUSED")
+                    else
+                        notify("Autofarm RESUMED")
+                    end
+                end
+            else
+                toggleDebounce = false
+            end
+        end
+    end)
     
     local function isStandOut(c)
         if not c then return false end
@@ -129,6 +163,8 @@ if isHeadless then
         local emptyTimer = 0
         while true do
             task.wait(0.5) 
+            if isFarmPaused then continue end
+            
             local c = player.Character
             local inGame = c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChildOfClass("Humanoid") and c.Humanoid.Health > 0
             
@@ -174,6 +210,8 @@ if isHeadless then
     task.spawn(function()
         while true do
             task.wait(0.05)
+            if isFarmPaused then continue end
+            
             local c = player.Character
             if not c then continue end 
             local root = c:FindFirstChild("HumanoidRootPart")
@@ -1502,4 +1540,3 @@ task.spawn(function()
         end
     end
 end)
---- testing testing 
