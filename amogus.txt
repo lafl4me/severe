@@ -1343,28 +1343,31 @@ task.spawn(function()
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if not root or char.Humanoid.Health <= 0 then continue end
 
-        if not (findCombatTarget() ~= nil) then
-            -- PHASE 1: YOGA MAT
+        -- PHASE 1: GET TO DOJO (Via Yoga Mat)
+        local npcs = workspace:FindFirstChild("Npcs")
+        local theSelf = npcs and npcs:FindFirstChild("The Self")
+        local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart")
+        
+        local inDojo = false
+        if selfHrp and getDistance(root.Position, selfHrp.Position) < 300 then
+            inDojo = true
+        end
+        
+        if not inDojo and not findCombatTarget() then
             local map = workspace:FindFirstChild("Map")
             local meditation = map and map:FindFirstChild("Meditation")
             local yogaMat = meditation and meditation:FindFirstChild("Yoga Mat")
             
             if yogaMat and isConjFarmOn then
                 local teleported = false
-                
-                -- SAFETY NET: If we are already far away, assume we got teleported successfully
-                if getDistance(root.Position, yogaMat.Position) > 200 then
-                    teleported = true
-                end
-                
                 while not teleported and isConjFarmOn do
-                    -- PRE-CHECK: Stop pulling back if suddenly teleported by the game
-                    if getDistance(root.Position, yogaMat.Position) > 200 then
+                    if selfHrp and getDistance(root.Position, selfHrp.Position) < 300 then
                         teleported = true
                         break
                     end
                     
                     for i = 1, 5 do
+                        root.Velocity = Vector3.zero
                         root.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
                         task.wait(0.1)
                     end
@@ -1397,17 +1400,9 @@ task.spawn(function()
                         keypress(E_KEY) 
                     end
                     
-                    -- WAIT FOR TELEPORT (5.8 seconds)
-                    while tick() - startTime < 5.8 and isConjFarmOn do
+                    while tick() - startTime < 6.5 and isConjFarmOn do
                         task.wait(0.1) 
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                        
-                        -- Break immediately if the boss spawns during the wait
-                        if findCombatTarget() then
-                            teleported = true
-                            break
-                        end
-                        
                         if currentHrp and getDistance(currentHrp.Position, startPos) >= 50 then
                             teleported = true
                             break
@@ -1416,127 +1411,114 @@ task.spawn(function()
                     
                     if keyrelease then keyrelease(E_KEY) end
                     camLockActive = false
-                    
                     if not teleported then task.wait(0.5) end
                 end
-                task.wait(0.5)
             end
+        end
 
-            if not isConjFarmOn then continue end
-
-            -- PHASE 2: THE SELF
-            local npcs = workspace:FindFirstChild("Npcs")
-            local theSelf = npcs and npcs:FindFirstChild("The Self")
-            local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart")
-            
-            if selfHrp and isConjFarmOn then
-                local inArena = false
-                
-                -- SAFETY NET: If we are already far away, assume we got into combat
-                if getDistance(root.Position, selfHrp.Position) > 200 then
-                    inArena = true
+        if not isConjFarmOn then continue end
+        
+        -- PHASE 2: SPAWN BOSS (Talk to The Self)
+        if not findCombatTarget() and selfHrp and isConjFarmOn then
+            local bossSpawned = false
+            while not bossSpawned and isConjFarmOn do
+                if findCombatTarget() then
+                    bossSpawned = true
+                    break
                 end
                 
-                while not inArena and isConjFarmOn do
-                    -- PRE-CHECK: Stop pulling back if suddenly teleported by the game
-                    if getDistance(root.Position, selfHrp.Position) > 200 then
-                        inArena = true
+                local selfPos = selfHrp.Position
+                local lookDir = selfHrp.CFrame.LookVector
+                local targetPos = selfPos + (lookDir * 4)
+                local flatTargetPos = Vector3.new(targetPos.X, selfPos.Y, targetPos.Z)
+                
+                for i = 1, 5 do
+                    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                        player.Character.HumanoidRootPart.Velocity = Vector3.zero
+                        player.Character.HumanoidRootPart.CFrame = CFrame.lookAt(flatTargetPos, selfPos)
+                    end
+                    task.wait(0.05)
+                end
+                
+                if keypress and isConjFarmOn then
+                    keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
+                    task.wait(0.05)
+                    keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
+                end
+                task.wait(0.2)
+                
+                local startTime = tick()
+                if keypress and isConjFarmOn then keypress(E_KEY) end
+                task.wait(1.5) 
+                
+                while isConjFarmOn do
+                    task.wait(0.1)
+                    if keypress then
+                        keypress(ONE_KEY); task.wait(0.01); keyrelease(ONE_KEY)
+                    end
+                    
+                    if findCombatTarget() then
+                        bossSpawned = true
                         break
                     end
                     
-                    for i = 1, 5 do
-                        local targetCFrame = selfHrp.CFrame * CFrame.new(0, 0, -3)
-                        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                            player.Character.HumanoidRootPart.CFrame = CFrame.lookAt(targetCFrame.Position, selfHrp.Position)
-                        end
-                        task.wait(0.05)
-                    end
-                    
-                    local startPos = player.Character.HumanoidRootPart.Position
-                    
-                    if keypress and isConjFarmOn then
-                        keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
-                        task.wait(0.05)
-                        keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
-                    end
-                    task.wait(0.2)
-                    
-                    local startTime = tick()
-                    if keypress and isConjFarmOn then keypress(E_KEY) end
-                    task.wait(1.5) 
-                    
-                    -- WAIT FOR ARENA TELEPORT (5.8 seconds)
-                    while isConjFarmOn do
-                        task.wait(0.1)
-                        if keypress then
-                            keypress(ONE_KEY)
-                            task.wait(0.01)
-                            keyrelease(ONE_KEY)
-                        end
-                        
-                        local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                        if (curHrp and getDistance(curHrp.Position, startPos) >= 50) or findCombatTarget() then
-                            inArena = true
-                            break
-                        end
-                        
-                        if tick() - startTime > 5.8 then break end 
-                    end
-                    
-                    if keyrelease then 
-                        keyrelease(E_KEY) 
-                        keyrelease(ONE_KEY)
-                    end
-                    if not inArena then task.wait(0.5) end
+                    if tick() - startTime > 5.0 then break end 
                 end
+                
+                if keyrelease then 
+                    keyrelease(E_KEY) 
+                    keyrelease(ONE_KEY)
+                end
+                if not bossSpawned then task.wait(0.5) end
             end
         end
 
         if not isConjFarmOn then continue end
 
         -- PHASE 3: COMBAT
-        local target = nil
-        while not target and isConjFarmOn do
-            target = findCombatTarget()
-            task.wait(0.1)
-        end
-        
+        local target = findCombatTarget()
         local lastSummon = 0
         local attacking = false
         
-        while target and target.hum.Health > 0 and isConjFarmOn do
-            task.wait(0.1)
-            local c = player.Character
-            local r = c and c:FindFirstChild("HumanoidRootPart")
-            if not r or not c:FindFirstChild("Humanoid") or c.Humanoid.Health <= 0 then break end
-            
-            if not isStandOut(c) and (tick() - lastSummon) > 3 then
-                if keypress then keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY) end
-                lastSummon = tick()
+        if target then
+            while target and target.hum.Health > 0 and isConjFarmOn do
+                task.wait(0.1)
+                local c = player.Character
+                local r = c and c:FindFirstChild("HumanoidRootPart")
+                if not r or not c:FindFirstChild("Humanoid") or c.Humanoid.Health <= 0 then break end
+                
+                if not isStandOut(c) and (tick() - lastSummon) > 3 then
+                    if keypress then keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY) end
+                    lastSummon = tick()
+                end
+                
+                r.Velocity = Vector3.zero
+                r.CFrame = calculateTargetCFrame(target.hrp)
+                
+                if not attacking then
+                    attacking = true
+                    task.spawn(function()
+                        if mouse1press then mouse1press(); task.wait(0.01); mouse1release() end
+                        if keypress then
+                            for _, k in ipairs(ATTACK_KEYS) do keypress(k); task.wait(0.01); keyrelease(k) end
+                        end
+                        attacking = false
+                    end)
+                end
             end
             
-            r.CFrame = calculateTargetCFrame(target.hrp)
-            
-            if not attacking then
-                attacking = true
-                task.spawn(function()
-                    if mouse1press then mouse1press(); task.wait(0.01); mouse1release() end
-                    if keypress then
-                        for _, k in ipairs(ATTACK_KEYS) do keypress(k); task.wait(0.01); keyrelease(k) end
-                    end
-                    attacking = false
-                end)
+            -- PHASE 4: GRACEFUL LANDING
+            if isConjFarmOn and selfHrp then
+                local c = player.Character
+                local r = c and c:FindFirstChild("HumanoidRootPart")
+                if r then
+                    r.Velocity = Vector3.zero
+                    local selfPos = selfHrp.Position
+                    local flatTargetPos = Vector3.new(selfPos.X, selfPos.Y, selfPos.Z) + Vector3.new(0, 0, 5)
+                    r.CFrame = CFrame.lookAt(flatTargetPos, selfPos)
+                end
             end
-        end
-        
-        -- PHASE 4: RETURN
-        if isConjFarmOn then
-            local combatPos = player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character.HumanoidRootPart.Position or Vector3.zero
-            repeat
-                task.wait(0.5)
-                local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            until not isConjFarmOn or (curHrp and getDistance(curHrp.Position, combatPos) >= 40) 
-            task.wait(0.5)
+            task.wait(1.5) 
         end
     end
 end)
