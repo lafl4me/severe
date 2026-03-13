@@ -40,6 +40,14 @@ local function trim(s)
     return string.match(s, "^%s*(.-)%s*$") or ""
 end
 
+-- Smart Key Formatter (Allows lowercase "tab", "q", "e" in _G.Settings)
+local function cleanKey(key)
+    if not key then return "Q" end
+    local upperKey = string.upper(tostring(key))
+    if upperKey == "TAB" then return "Tab" end
+    return upperKey
+end
+
 -- ==============================================================================
 -- HEADLESS V5 AUTOFARM ENGINE (Triggered via _G.Settings)
 -- ==============================================================================
@@ -58,8 +66,12 @@ if isHeadless then
     local RANDOM_SWITCH_SPEED = cfg.autofarm.speed or 1
     local OFFSET_DISTANCE = cfg.autofarm.distance or 10
     
-    local summonKeyStr = cfg.keybinds and cfg.keybinds.summon or "Q"
-    local attackKeyStrs = cfg.keybinds and cfg.keybinds.attack or {"E", "R", "Z", "X", "C", "V"}
+    local rawSummonStr = cfg.keybinds and cfg.keybinds.summon or "Q"
+    local rawAttackStrs = cfg.keybinds and cfg.keybinds.attack or {"E", "R", "Z", "X", "C", "V"}
+    
+    local summonKeyStr = cleanKey(rawSummonStr)
+    local attackKeyStrs = {}
+    for _, k in ipairs(rawAttackStrs) do table.insert(attackKeyStrs, cleanKey(k)) end
     
     local SUMMON_KEY = KEY_MAP[summonKeyStr] or 0x51
     local ATTACK_KEYS = {}
@@ -279,12 +291,18 @@ if makefolder and isfolder then
 end
 
 -- SEED UI DEFAULTS DIRECTLY FROM _G.SETTINGS IF AVAILABLE!
+local rawUiSummonStr = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q"
+local rawUiAttackStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E", "R", "Z", "X", "C", "V"}
+
+local cleanedUiAttackStrs = {}
+for _, k in ipairs(rawUiAttackStrs) do table.insert(cleanedUiAttackStrs, cleanKey(k)) end
+
 local Config = {
     HitPosition = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.position) or "Above",
     OffsetDistance = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.distance) or 10,
     RandomSwitchSpeed = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.speed) or 2,
-    SummonKeyStr = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q",
-    AttackKeyStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E", "R", "Z", "X", "C", "V"},
+    SummonKeyStr = cleanKey(rawUiSummonStr),
+    AttackKeyStrs = cleanedUiAttackStrs,
     WhitelistedNames = {},
     TargetPlayer = "None"
 }
@@ -425,11 +443,6 @@ local function getGroupedMobs()
     if liveFolder then
         for _, v in ipairs(liveFolder:GetChildren()) do
             if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= player.Character then
-                
-                -- ==========================================
-                -- EXECUTOR-SAFE PLAYER FILTER
-                -- Blocks real players from showing in the NPC list
-                -- ==========================================
                 local isRealPlayer = false
                 for _, p in ipairs(Players:GetChildren()) do
                     if p:IsA("Player") and p.Character == v then
@@ -463,8 +476,6 @@ local function getGroupedMobs()
     end
     
     table.sort(newMobs)
-    
-    -- ALWAYS PIN "None" AT THE TOP
     table.insert(newMobs, 1, "None")
     
     local found = false
@@ -485,8 +496,6 @@ local function getPlayerNames()
         end
     end
     table.sort(list)
-    
-    -- ALWAYS PIN "None" AT THE TOP
     table.insert(list, 1, "None")
     
     local found = false
@@ -1029,8 +1038,8 @@ end)
 -- ==========================================
 setTab:addText({ text = " " }) 
 setTab:addText({ text = "  [ LIVE BOT STATE ]  " })
-liveState1 = setTab:addText({ text = "Position: Above | Dist: 10 | Delay: 2s" })
-liveState2 = setTab:addText({ text = "Stand Key: Q | Atk Keys: [E, R, Z, X, C, V]" })
+liveState1 = setTab:addText({ text = "Position: " .. tostring(Config.HitPosition) .. " | Dist: " .. tostring(Config.OffsetDistance) .. " | Delay: " .. tostring(Config.RandomSwitchSpeed) .. "s" })
+liveState2 = setTab:addText({ text = "Stand Key: " .. tostring(Config.SummonKeyStr) .. " | Atk Keys: [" .. table.concat(Config.AttackKeyStrs, ", ") .. "]" })
 liveState3 = setTab:addText({ text = "Whitelist: 0 | Target Mob: None" })
 liveState4 = setTab:addText({ text = "Target Player: None" })
 
