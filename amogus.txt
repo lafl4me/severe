@@ -203,7 +203,6 @@ if isHeadless then
                 for _, v in ipairs(lf:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
                         local name = v.Name:lower()
-                        -- V5 Specific logic: Targets any mob with a period (.) in front
                         if string.sub(name, 1, 1) == "." then
                             if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
                                 local mh = v:FindFirstChildOfClass("Humanoid")
@@ -250,6 +249,10 @@ if isHeadless then
                     elseif mode == "Middle" then root.CFrame = CFrame.lookAt(pos + (look * 2.5), pos)
                     else root.CFrame = CFrame.lookAt(pos + Vector3.new(0, OFFSET_DISTANCE, 0), pos) end
                     
+                    -- FIX: Stabilize gravity pulling us down
+                    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                    
                     if not isAttacking then
                         isAttacking = true
                         task.spawn(function()
@@ -273,17 +276,13 @@ if isHeadless then
         end
     end)
     
-    -- END EXECUTION SO THE UI DOES NOT LOAD
     return 
 end
 
 -- ==============================================================================
--- BIZARRE LINEAGE HUB (Loads if _G.Settings.autofarm.Enabled is FALSE or Nil)
+-- BIZARRE LINEAGE HUB
 -- ==============================================================================
 
--- ==========================================
--- CUSTOM CONFIG ENGINE (FOLDER SCANNER)
--- ==========================================
 local FOLDER_PATH = "BZL"
 local SLOT_COUNT = 6
 local currentSelectedSlot = "Config 1"
@@ -294,7 +293,6 @@ if makefolder and isfolder then
     end
 end
 
--- SEED UI DEFAULTS DIRECTLY FROM _G.SETTINGS IF AVAILABLE!
 local rawUiSummonStr = if _G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon then _G.Settings.keybinds.summon else "Q"
 local rawUiAttackStrs = if _G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack then _G.Settings.keybinds.attack else {"E", "R", "Z", "X", "C", "V"}
 
@@ -347,7 +345,6 @@ local function DeserializeConfig(str)
     return cfg
 end
 
--- AUTO-LOAD SYSTEM
 local AutoLoadedName = nil
 for i = 1, SLOT_COUNT do
     local baseName = "Config " .. i
@@ -369,9 +366,6 @@ if not Config.RandomSwitchSpeed then Config.RandomSwitchSpeed = 2 end
 if not Config.WhitelistedNames then Config.WhitelistedNames = {} end
 if not Config.TargetPlayer then Config.TargetPlayer = "None" end
 
--- ==========================================
--- GLOBAL HUB STATE
--- ==========================================
 local isLobbyFarmOn = false
 local isConjFarmOn = false
 local isMobFarmOn = false
@@ -381,7 +375,7 @@ local currentRandomMode = "Above"
 local lastRandomChange = 0
 local OFFSET_DISTANCE = Config.OffsetDistance
 local RANDOM_SWITCH_SPEED = Config.RandomSwitchSpeed
-local SCAN_SPEED = 0.1 -- ADDED: Explicitly defined missing SCAN_SPEED
+local SCAN_SPEED = 0.1 
 
 local MIN_Y_LEVEL = -150 
 local MAX_DISTANCE = 2500 
@@ -409,9 +403,6 @@ local function getDistance(pos1: Vector3, pos2: Vector3)
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 end
 
--- ==========================================
--- ROBUST WHITELIST CHECKER
--- ==========================================
 local function isWhitelisted(entity)
     if not entity then return false end
     local entName = string.lower(entity.Name)
@@ -420,10 +411,8 @@ local function isWhitelisted(entity)
         if wName == "" then continue end
         local lowerW = string.lower(wName)
         
-        -- Direct Match
         if entName == lowerW then return true end
         
-        -- Deep Player Verification
         for _, p in ipairs(Players:GetChildren()) do
             if p:IsA("Player") then
                 if string.lower(p.Name) == lowerW or string.lower(p.DisplayName) == lowerW then
@@ -437,9 +426,6 @@ local function isWhitelisted(entity)
     return false
 end
 
--- ==========================================
--- DATA FETCHERS
--- ==========================================
 local function getGroupedMobs()
     local counts = {}
     local bases = {}
@@ -522,9 +508,6 @@ local function UpdateUIElement(element, value)
     end)
 end
 
--- ==========================================
--- UI INITIALIZATION & CUSTOM THEME (OLED SAFE)
--- ==========================================
 local bytecode = game:HttpGet("https://github.com/misterzeee/SevereUiLib/raw/refs/heads/main/MainByteCode.lua")
 local func = luau.load(bytecode)
 func()
@@ -553,9 +536,6 @@ local conjTab   = win:addTab("Conjuration")
 local tpTab     = win:addTab("Teleports")
 local setTab    = win:addTab("Config")
 
--- ==========================================
--- TAB: RANDOMIZED KILLING 
--- ==========================================
 lobbyTab:addText({ text = "  [ RANDOMIZED KILLING ]  " })
 
 local lobbyCheck = lobbyTab:addCheckbox({ text = "Enable Autofarm", default = false })
@@ -624,9 +604,6 @@ refreshWlBtn.OnClick:Connect(function()
     notify("Players list refreshed!")
 end)
 
--- ==========================================
--- TAB: SPECIFIC MOB & PLAYER (TARGET)
--- ==========================================
 mobTab:addText({ text = "  [ ENTITY SELECTION ]  " })
 
 local initialMobs = getGroupedMobs()
@@ -686,9 +663,6 @@ mobCheck.OnChanged:Connect(function(v)
     end
 end)
 
--- ==========================================
--- TAB: FARM SETUP (Positions & Keybinds)
--- ==========================================
 combatTab:addText({ text = "  [ AUTOFARM POSITION ]  " })
 combatTab:addText({ text = "⚠ UI Limitation: Sliders do not visually update" })
 combatTab:addText({ text = "when you load a saved config file." })
@@ -755,9 +729,6 @@ attackKeysDrop.OnChanged:Connect(function(indices, values)
     if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
--- ==========================================
--- TAB: CONJURATION
--- ==========================================
 conjTab:addText({ text = "  [ CONJURATION FARM ]  " })
 conjTab:addText({ text = "⚠ Note: When running this script be near the gym." })
 
@@ -770,9 +741,6 @@ conjCheck.OnChanged:Connect(function(v)
     end
 end)
 
--- ==========================================
--- TAB: TELEPORTS
--- ==========================================
 tpTab:addText({ text = "  [ MAP LOCATIONS ]  " })
 
 local tpLocations = {
@@ -794,6 +762,8 @@ for _, loc in ipairs(tpLocations) do
             task.spawn(function()
                 for i = 1, 5 do
                     root.CFrame = CFrame.new(loc.pos)
+                    -- Fix teleport fall-throughs
+                    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                     task.wait(0.05)
                 end
                 notify("Teleported to " .. loc.name .. "!")
@@ -844,6 +814,8 @@ teleportToPlayerBtn.OnClick:Connect(function()
             task.spawn(function()
                 for i = 1, 5 do
                     root.CFrame = CFrame.new(targetPlr.Character.HumanoidRootPart.Position + Vector3.new(0, 3, 0))
+                    -- Fix teleport fall-throughs
+                    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                     task.wait(0.05)
                 end
                 notify("Teleported to " .. targetPlr.Name .. "!")
@@ -854,9 +826,6 @@ teleportToPlayerBtn.OnClick:Connect(function()
     end
 end)
 
--- ==========================================
--- TAB: CONFIGURATION & SAVING
--- ==========================================
 setTab:addText({ text = "  [ DATA MANAGER ]  " })
 
 local function getSlotsAndCount()
@@ -1084,7 +1053,6 @@ local function calculateTargetCFrame(targetRoot)
     local look = targetRoot.CFrame.LookVector
     local mode = hitPosition
 
-    -- Random Mode Logic
     if mode == "Random" then
         if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
             local modes = {"Above", "Below", "Behind", "Middle"} 
@@ -1092,8 +1060,6 @@ local function calculateTargetCFrame(targetRoot)
             lastRandomChange = tick()
         end
         mode = currentRandomMode
-        
-    -- Up & Down Mode Logic
     elseif mode == "Up & down" then
         if tick() - lastRandomChange > RANDOM_SWITCH_SPEED then
             if currentRandomMode == "Above" then
@@ -1163,6 +1129,11 @@ task.spawn(function()
 
             if closestTarget then
                 root.CFrame = calculateTargetCFrame(closestTarget)
+                
+                -- FIX: Stabilize gravity pulling us down
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
@@ -1242,6 +1213,11 @@ task.spawn(function()
 
             if closestTarget then
                 root.CFrame = calculateTargetCFrame(closestTarget)
+                
+                -- FIX: Stabilize gravity pulling us down
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
@@ -1326,6 +1302,10 @@ task.spawn(function()
                 while not teleported and isConjFarmOn do
                     for i = 1, 5 do
                         root.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
+                        
+                        -- Fix teleport fall-throughs
+                        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        
                         task.wait(0.1)
                     end
                     
@@ -1357,7 +1337,6 @@ task.spawn(function()
                         keypress(E_KEY) 
                     end
                     
-                    -- FIX: Increased the timeout window significantly to allow slow teleports.
                     while tick() - startTime < 6.5 and isConjFarmOn do
                         task.wait(SCAN_SPEED)
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -1389,6 +1368,9 @@ task.spawn(function()
                         local targetCFrame = selfHrp.CFrame * CFrame.new(0, 0, -3)
                         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
                             player.Character.HumanoidRootPart.CFrame = CFrame.lookAt(targetCFrame.Position, selfHrp.Position)
+                            
+                            -- Fix teleport fall-throughs
+                            player.Character.HumanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                         end
                         task.wait(0.05)
                     end
@@ -1420,7 +1402,6 @@ task.spawn(function()
                             break
                         end
                         
-                        -- FIX: Increased the timeout window here just in case.
                         if tick() - startTime > 8.5 then break end
                     end
                     
@@ -1457,6 +1438,10 @@ task.spawn(function()
             end
             
             r.CFrame = calculateTargetCFrame(target.hrp)
+            
+            -- FIX: Stabilize gravity pulling us down
+            r.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            r.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
             
             if not attacking then
                 attacking = true
