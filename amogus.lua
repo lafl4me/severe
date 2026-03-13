@@ -40,7 +40,6 @@ local function trim(s)
     return string.match(s, "^%s*(.-)%s*$") or ""
 end
 
--- Smart Key Formatter (Allows lowercase "tab", "q", "e" in _G.Settings)
 local function cleanKey(key)
     if not key then return "Q" end
     local upperKey = string.upper(tostring(key))
@@ -103,7 +102,6 @@ if isHeadless then
         lastSummonTime = tick()
     end
 
-    -- 1. UNIVERSAL AUTO-CLICKER (V5)
     task.spawn(function()
         local PLAY_SCALE_X = 0.5213541666666667
         local PLAY_SCALE_Y = 0.6333002973240832
@@ -170,7 +168,6 @@ if isHeadless then
         end
     end)
     
-    -- 2. V5 COMBAT & TARGETING LOOP
     task.spawn(function()
         while true do
             task.wait(0.05)
@@ -199,7 +196,6 @@ if isHeadless then
                 for _, v in ipairs(lf:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
                         local name = v.Name:lower()
-                        -- V5 Specific logic: Targets any mob with a period (.) in front
                         if string.sub(name, 1, 1) == "." then
                             if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
                                 local mh = v:FindFirstChildOfClass("Humanoid")
@@ -207,7 +203,9 @@ if isHeadless then
                                     local hrp = v.HumanoidRootPart
                                     local tPos = hrp.Position
                                     if tPos.Y >= MIN_Y_LEVEL then
-                                        local dx, dy, dz = myPos.X - tPos.X, myPos.Y - tPos.Y, myPos.Z - tPos.Z
+                                        local dx = myPos.X - tPos.X
+                                        local dy = myPos.Y - tPos.Y
+                                        local dz = myPos.Z - tPos.Z
                                         local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
                                         if dist < minDistance and dist < MAX_DISTANCE then
                                             minDistance = dist
@@ -269,17 +267,13 @@ if isHeadless then
         end
     end)
     
-    -- END EXECUTION SO THE UI DOES NOT LOAD
     return 
 end
 
 -- ==============================================================================
--- BIZARRE LINEAGE HUB (Loads if _G.Settings.autofarm.Enabled is FALSE or Nil)
+-- BIZARRE LINEAGE HUB
 -- ==============================================================================
 
--- ==========================================
--- CUSTOM CONFIG ENGINE (FOLDER SCANNER)
--- ==========================================
 local FOLDER_PATH = "BZL"
 local SLOT_COUNT = 6
 local currentSelectedSlot = "Config 1"
@@ -290,7 +284,6 @@ if makefolder and isfolder then
     end
 end
 
--- SEED UI DEFAULTS DIRECTLY FROM _G.SETTINGS IF AVAILABLE!
 local rawUiSummonStr = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q"
 local rawUiAttackStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E", "R", "Z", "X", "C", "V"}
 
@@ -343,7 +336,6 @@ local function DeserializeConfig(str)
     return cfg
 end
 
--- AUTO-LOAD SYSTEM
 local AutoLoadedName = nil
 for i = 1, SLOT_COUNT do
     local baseName = "Config " .. i
@@ -404,9 +396,6 @@ local function getDistance(pos1: Vector3, pos2: Vector3)
     return math.sqrt(dx*dx + dy*dy + dz*dz)
 end
 
--- ==========================================
--- ROBUST WHITELIST CHECKER
--- ==========================================
 local function isWhitelisted(entity)
     if not entity then return false end
     local entName = string.lower(entity.Name)
@@ -415,10 +404,8 @@ local function isWhitelisted(entity)
         if wName == "" then continue end
         local lowerW = string.lower(wName)
         
-        -- Direct Match
         if entName == lowerW then return true end
         
-        -- Deep Player Verification
         for _, p in ipairs(Players:GetChildren()) do
             if p:IsA("Player") then
                 if string.lower(p.Name) == lowerW or string.lower(p.DisplayName) == lowerW then
@@ -518,12 +505,13 @@ local function UpdateUIElement(element, value)
 end
 
 -- ==========================================
--- UI INITIALIZATION & CUSTOM THEME (OLED SAFE)
+-- UI INITIALIZATION & CUSTOM THEME
 -- ==========================================
 local bytecode = game:HttpGet("https://github.com/misterzeee/SevereUiLib/raw/refs/heads/main/MainByteCode.lua")
 local func = luau.load(bytecode)
 func()
-local UI = zeeUi
+local UI = (getfenv(func) and getfenv(func).zeeUi) or _G.zeeUi or getgenv().zeeUi
+if not UI then UI = zeeUi end
 
 UI.setTheme({
     Background = {18, 18, 18},     
@@ -667,7 +655,6 @@ refreshPlrBtn.OnClick:Connect(function()
     end)
     notify("Player list refreshed!")
 end)
-
 
 mobTab:addText({ text = " " })
 mobTab:addText({ text = "  [ AUTOMATION ]  " })
@@ -1251,44 +1238,49 @@ end)
 -- ==========================================
 -- MODULE 3: CONJURATION AUTOFARM
 -- ==========================================
-local SPECIFIC_TARGETS = {
-    "entity", 
-    "clone59"
-}
-
 local function findCombatTarget()
     local liveFolder = workspace:FindFirstChild("Live")
     if not liveFolder then return nil end
+    
     local char = player.Character
-    local myPos = char and char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Position
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    
+    local myPos = root.Position
+    
+    -- [ALTITUDE LOCK]
+    -- The arena is at Y: 23081. If we are below Y: 10000, DO NOT search for combat targets!
+    -- This prevents the script from randomly attacking Boxers near the Gym before teleporting.
+    if myPos.Y < 10000 then return nil end
 
     local closestTarget = nil
-    local minDistance = 150 
+    local minDistance = 500 
 
     for _, v in ipairs(liveFolder:GetChildren()) do
         if not v or v == char or v.Name == player.Name then continue end
         
         if isWhitelisted(v) then continue end
 
-        local lowerName = string.lower(v.Name)
-        local isMatch = false
-        for _, keyword in ipairs(SPECIFIC_TARGETS) do
-            if string.find(lowerName, string.lower(keyword)) then
-                isMatch = true
+        -- Skip other actual players
+        local isRealPlayer = false
+        for _, p in ipairs(Players:GetChildren()) do
+            if p:IsA("Player") and p.Character == v then
+                isRealPlayer = true
                 break
             end
         end
+        if isRealPlayer then continue end
 
-        if isMatch then
-            local mobHum = v:FindFirstChildOfClass("Humanoid")
-            local targetHrp = v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")
-            if targetHrp and mobHum then
-                if myPos then
-                    local dist = getDistance(myPos, targetHrp.Position)
-                    if dist < minDistance then
-                        minDistance = dist
-                        closestTarget = {hrp = targetHrp, hum = mobHum}
-                    end
+        local mobHum = v:FindFirstChildOfClass("Humanoid")
+        local targetHrp = v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")
+        
+        if targetHrp and mobHum and mobHum.Health > 0 then
+            -- Double check the target is also in the sky arena
+            if targetHrp.Position.Y > 10000 then
+                local dist = getDistance(myPos, targetHrp.Position)
+                if dist < minDistance then
+                    minDistance = dist
+                    closestTarget = {hrp = targetHrp, hum = mobHum}
                 end
             end
         end
@@ -1348,8 +1340,9 @@ task.spawn(function()
                         keypress(E_KEY) 
                     end
                     
-                    while tick() - startTime < 3 and isConjFarmOn do
-                        task.wait(SCAN_SPEED)
+                    -- Wait condition updated to 5.5s timeout to handle lag
+                    while tick() - startTime < 5.5 and isConjFarmOn do
+                        task.wait(0.1) 
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                         if currentHrp and getDistance(currentHrp.Position, startPos) >= 40 then
                             teleported = true
@@ -1410,7 +1403,8 @@ task.spawn(function()
                             break
                         end
                         
-                        if tick() - startTime > 6 then break end
+                        -- Match the wait scale of Phase 1 to permit enough loading time
+                        if tick() - startTime > 8.5 then break end
                     end
                     
                     if keyrelease then 
@@ -1428,14 +1422,14 @@ task.spawn(function()
         local target = nil
         while not target and isConjFarmOn do
             target = findCombatTarget()
-            task.wait(SCAN_SPEED)
+            task.wait(0.1)
         end
         
         local lastSummon = 0
         local attacking = false
         
         while target and target.hum.Health > 0 and isConjFarmOn do
-            task.wait(SCAN_SPEED)
+            task.wait(0.05)
             local c = player.Character
             local r = c and c:FindFirstChild("HumanoidRootPart")
             if not r or not c:FindFirstChild("Humanoid") or c.Humanoid.Health <= 0 then break end
@@ -1470,3 +1464,4 @@ task.spawn(function()
         end
     end
 end)
+
