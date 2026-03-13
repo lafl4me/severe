@@ -10,10 +10,50 @@ while not player do
     player = Players.LocalPlayer
 end
 
--- Pure API Console Logging (No Roblox UI elements)
+-- Pure API Console Logging
 local function notify(text)
     print("[BZL Hub]: " .. text)
 end
+
+-- ==========================================
+-- GLOBAL PAUSE TOGGLE (F4 KEYBIND)
+-- ==========================================
+local isFarmPaused = false
+local toggleDebounce = false
+
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        local isPressed = false
+        
+        pcall(function()
+            if getpressedkeys then
+                local keys = getpressedkeys()
+                for _, key in pairs(keys) do
+                    local kStr = tostring(key)
+                    if string.find(kStr, "F4") then
+                        isPressed = true
+                        break
+                    end
+                end
+            end
+        end)
+        
+        if isPressed then
+            if not toggleDebounce then
+                toggleDebounce = true
+                isFarmPaused = not isFarmPaused
+                if isFarmPaused then
+                    notify("Autofarm PAUSED [F4]")
+                else
+                    notify("Autofarm RESUMED [F4]")
+                end
+            end
+        else
+            toggleDebounce = false
+        end
+    end
+end)
 
 -- ==========================================
 -- DYNAMIC KEY MAPPING & UTILS
@@ -35,7 +75,6 @@ local function trim(s)
     return string.match(s, "^%s*(.-)%s*$") or ""
 end
 
--- Smart Key Formatter (Allows lowercase "tab", "q", "e" in _G.Settings)
 local function cleanKey(key)
     if not key then return "Q" end
     local upperKey = string.upper(tostring(key))
@@ -54,8 +93,7 @@ if _G.Settings and type(_G.Settings) == "table" and _G.Settings.autofarm then
 end
 
 if isHeadless then
-    print("[BZL Hub]: _G.Settings Detected. Running V5 Headless Autofarm.")
-    notify("Headless Farm Started! Press [F4] to Pause/Resume.")
+    notify("Running V5 Headless Autofarm. Press [F4] to Pause/Resume.")
     
     local cfg = _G.Settings
     local hitPosition = cfg.autofarm.position or "Up & down"
@@ -84,44 +122,6 @@ if isHeadless then
     local MIN_Y_LEVEL = -150 
     local MAX_DISTANCE = 2500 
     
-    local isFarmPaused = false
-    local toggleDebounce = false
-
-    -- EXECUTOR-SAFE F4 TOGGLE LOOP
-    task.spawn(function()
-        while true do
-            task.wait(0.05)
-            local isPressed = false
-            
-            pcall(function()
-                if getpressedkeys then
-                    local keys = getpressedkeys()
-                    for _, key in pairs(keys) do
-                        local kStr = tostring(key)
-                        if string.find(kStr, "F4") then
-                            isPressed = true
-                            break
-                        end
-                    end
-                end
-            end)
-            
-            if isPressed then
-                if not toggleDebounce then
-                    toggleDebounce = true
-                    isFarmPaused = not isFarmPaused
-                    if isFarmPaused then
-                        notify("Autofarm PAUSED")
-                    else
-                        notify("Autofarm RESUMED")
-                    end
-                end
-            else
-                toggleDebounce = false
-            end
-        end
-    end)
-    
     local function isStandOut(c)
         if not c then return false end
         local a = c:GetAttribute("SummonedStand")
@@ -137,7 +137,6 @@ if isHeadless then
         lastSummonTime = tick()
     end
 
-    -- 1. UNIVERSAL AUTO-CLICKER (V5)
     task.spawn(function()
         local PLAY_SCALE_X = 0.5213541666666667
         local PLAY_SCALE_Y = 0.6333002973240832
@@ -206,7 +205,6 @@ if isHeadless then
         end
     end)
     
-    -- 2. V5 COMBAT & TARGETING LOOP
     task.spawn(function()
         while true do
             task.wait(0.05)
@@ -237,7 +235,6 @@ if isHeadless then
                 for _, v in ipairs(lf:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
                         local name = v.Name:lower()
-                        -- V5 Specific logic: Targets any mob with a period (.) in front
                         if string.sub(name, 1, 1) == "." then
                             if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
                                 local mh = v:FindFirstChildOfClass("Humanoid")
@@ -307,7 +304,6 @@ if isHeadless then
         end
     end)
     
-    -- END EXECUTION SO THE UI DOES NOT LOAD
     return 
 end
 
@@ -328,7 +324,6 @@ if makefolder and isfolder then
     end
 end
 
--- SEED UI DEFAULTS DIRECTLY FROM _G.SETTINGS IF AVAILABLE!
 local rawUiSummonStr = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q"
 local rawUiAttackStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E", "R", "Z", "X", "C", "V"}
 
@@ -381,7 +376,6 @@ local function DeserializeConfig(str)
     return cfg
 end
 
--- AUTO-LOAD SYSTEM
 local AutoLoadedName = nil
 for i = 1, SLOT_COUNT do
     local baseName = "Config " .. i
@@ -1081,6 +1075,9 @@ liveState2 = setTab:addText({ text = "Stand Key: " .. tostring(Config.SummonKeyS
 liveState3 = setTab:addText({ text = "Whitelist: 0 | Target Mob: None" })
 liveState4 = setTab:addText({ text = "Target Player: None" })
 
+setTab:addText({ text = " " }) 
+setTab:addText({ text = " Toggle Autofarm Pause: [F4] " }) 
+
 if _G.UpdateLiveState then _G.UpdateLiveState() end
 
 if AutoLoadedName then
@@ -1150,7 +1147,7 @@ end
 task.spawn(function()
     while true do
         task.wait(0.05)
-        if not isLobbyFarmOn then continue end
+        if not isLobbyFarmOn or isFarmPaused then continue end
         
         local char = player.Character
         if not char then continue end 
@@ -1213,7 +1210,7 @@ end)
 task.spawn(function()
     while true do
         task.wait(0.05)
-        if not isMobFarmOn then continue end
+        if not isMobFarmOn or isFarmPaused then continue end
         
         local hasMobTarget = (selectedMob and selectedMob ~= "None" and selectedMob ~= "")
         local hasPlayerTarget = (selectedPlayerTarget and selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "")
@@ -1337,7 +1334,7 @@ end
 task.spawn(function()
     while true do
         task.wait(0.5) 
-        if not isConjFarmOn then continue end
+        if not isConjFarmOn or isFarmPaused then continue end
         
         local char = player.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -1358,16 +1355,15 @@ task.spawn(function()
             local meditation = map and map:FindFirstChild("Meditation")
             local yogaMat = meditation and meditation:FindFirstChild("Yoga Mat")
             
-            if yogaMat and isConjFarmOn then
+            if yogaMat and isConjFarmOn and not isFarmPaused then
                 local teleported = false
-                while not teleported and isConjFarmOn do
+                while not teleported and isConjFarmOn and not isFarmPaused do
                     if selfHrp and getDistance(root.Position, selfHrp.Position) < 300 then
                         teleported = true
                         break
                     end
                     
                     for i = 1, 5 do
-                        root.Velocity = Vector3.zero
                         root.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
                         task.wait(0.1)
                     end
@@ -1400,9 +1396,14 @@ task.spawn(function()
                         keypress(E_KEY) 
                     end
                     
-                    while tick() - startTime < 6.5 and isConjFarmOn do
+                    -- WAIT FOR TELEPORT (5.8 seconds)
+                    while tick() - startTime < 5.8 and isConjFarmOn and not isFarmPaused do
                         task.wait(0.1) 
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                        if findCombatTarget() then
+                            teleported = true
+                            break
+                        end
                         if currentHrp and getDistance(currentHrp.Position, startPos) >= 50 then
                             teleported = true
                             break
@@ -1411,17 +1412,18 @@ task.spawn(function()
                     
                     if keyrelease then keyrelease(E_KEY) end
                     camLockActive = false
+                    
                     if not teleported then task.wait(0.5) end
                 end
             end
         end
 
-        if not isConjFarmOn then continue end
+        if not isConjFarmOn or isFarmPaused then continue end
         
         -- PHASE 2: SPAWN BOSS (Talk to The Self)
         if not findCombatTarget() and selfHrp and isConjFarmOn then
             local bossSpawned = false
-            while not bossSpawned and isConjFarmOn do
+            while not bossSpawned and isConjFarmOn and not isFarmPaused do
                 if findCombatTarget() then
                     bossSpawned = true
                     break
@@ -1434,7 +1436,6 @@ task.spawn(function()
                 
                 for i = 1, 5 do
                     if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                        player.Character.HumanoidRootPart.Velocity = Vector3.zero
                         player.Character.HumanoidRootPart.CFrame = CFrame.lookAt(flatTargetPos, selfPos)
                     end
                     task.wait(0.05)
@@ -1451,7 +1452,8 @@ task.spawn(function()
                 if keypress and isConjFarmOn then keypress(E_KEY) end
                 task.wait(1.5) 
                 
-                while isConjFarmOn do
+                -- WAIT FOR BOSS (5.8 seconds)
+                while isConjFarmOn and not isFarmPaused do
                     task.wait(0.1)
                     if keypress then
                         keypress(ONE_KEY); task.wait(0.01); keyrelease(ONE_KEY)
@@ -1462,7 +1464,7 @@ task.spawn(function()
                         break
                     end
                     
-                    if tick() - startTime > 5.0 then break end 
+                    if tick() - startTime > 5.8 then break end 
                 end
                 
                 if keyrelease then 
@@ -1473,7 +1475,7 @@ task.spawn(function()
             end
         end
 
-        if not isConjFarmOn then continue end
+        if not isConjFarmOn or isFarmPaused then continue end
 
         -- PHASE 3: COMBAT
         local target = findCombatTarget()
@@ -1481,7 +1483,7 @@ task.spawn(function()
         local attacking = false
         
         if target then
-            while target and target.hum.Health > 0 and isConjFarmOn do
+            while target and target.hum.Health > 0 and isConjFarmOn and not isFarmPaused do
                 task.wait(0.1)
                 local c = player.Character
                 local r = c and c:FindFirstChild("HumanoidRootPart")
@@ -1492,7 +1494,6 @@ task.spawn(function()
                     lastSummon = tick()
                 end
                 
-                r.Velocity = Vector3.zero
                 r.CFrame = calculateTargetCFrame(target.hrp)
                 
                 if not attacking then
@@ -1507,15 +1508,20 @@ task.spawn(function()
                 end
             end
             
-            -- PHASE 4: GRACEFUL LANDING
-            if isConjFarmOn and selfHrp then
-                local c = player.Character
-                local r = c and c:FindFirstChild("HumanoidRootPart")
-                if r then
-                    r.Velocity = Vector3.zero
-                    local selfPos = selfHrp.Position
-                    local flatTargetPos = Vector3.new(selfPos.X, selfPos.Y, selfPos.Z) + Vector3.new(0, 0, 5)
-                    r.CFrame = CFrame.lookAt(flatTargetPos, selfPos)
+            -- PHASE 4: GRACEFUL LANDING (No Velocity used to prevent executor errors)
+            if isConjFarmOn and selfHrp and not isFarmPaused then
+                local selfPos = selfHrp.Position
+                local flatTargetPos = Vector3.new(selfPos.X, selfPos.Y, selfPos.Z) + (selfHrp.CFrame.LookVector * 5)
+                
+                -- By looping the CFrame placement, we safely catch the player on the ground
+                -- overriding physics so they do not suffer fall damage or ragdoll!
+                for i = 1, 10 do
+                    local c = player.Character
+                    local r = c and c:FindFirstChild("HumanoidRootPart")
+                    if r then
+                        r.CFrame = CFrame.lookAt(flatTargetPos, selfPos)
+                    end
+                    task.wait(0.05)
                 end
             end
             task.wait(1.5) 
