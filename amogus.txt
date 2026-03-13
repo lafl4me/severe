@@ -40,34 +40,12 @@ local function trim(s)
     return string.match(s, "^%s*(.-)%s*$") or ""
 end
 
+-- Smart Key Formatter (Allows lowercase "tab", "q", "e" in _G.Settings)
 local function cleanKey(key)
     if not key then return "Q" end
     local upperKey = string.upper(tostring(key))
     if upperKey == "TAB" then return "Tab" end
     return upperKey
-end
-
--- ==========================================
--- ANTI-FALL STABILIZER
--- ==========================================
-local function setAntiFall(root, state)
-    if not root then return end
-    local currentBv = root:FindFirstChild("BZL_AntiFall")
-    if state then
-        if not currentBv then
-            pcall(function()
-                local bv = Instance.new("BodyVelocity")
-                bv.Name = "BZL_AntiFall"
-                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                bv.Velocity = Vector3.new(0, 0, 0)
-                bv.Parent = root
-            end)
-        end
-    else
-        if currentBv then
-            pcall(function() currentBv:Destroy() end)
-        end
-    end
 end
 
 -- ==============================================================================
@@ -125,6 +103,7 @@ if isHeadless then
         lastSummonTime = tick()
     end
 
+    -- 1. UNIVERSAL AUTO-CLICKER (V5)
     task.spawn(function()
         local PLAY_SCALE_X = 0.5213541666666667
         local PLAY_SCALE_Y = 0.6333002973240832
@@ -195,6 +174,7 @@ if isHeadless then
         end
     end)
     
+    -- 2. V5 COMBAT & TARGETING LOOP
     task.spawn(function()
         while true do
             task.wait(0.05)
@@ -263,8 +243,6 @@ if isHeadless then
                         mode = currentRandomMode
                     end
 
-                    setAntiFall(root, true)
-                    
                     if mode == "Above" then root.CFrame = CFrame.lookAt(pos + Vector3.new(0, OFFSET_DISTANCE, 0), pos)
                     elseif mode == "Below" then root.CFrame = CFrame.lookAt(pos + Vector3.new(0, -OFFSET_DISTANCE, 0), pos)
                     elseif mode == "Behind" then root.CFrame = CFrame.lookAt(pos - (look * OFFSET_DISTANCE), pos)
@@ -289,8 +267,6 @@ if isHeadless then
                             isAttacking = false
                         end)
                     end
-                else
-                    setAntiFall(root, false)
                 end
             end
         end
@@ -302,6 +278,7 @@ end
 -- ==============================================================================
 -- BIZARRE LINEAGE HUB
 -- ==============================================================================
+
 local FOLDER_PATH = "BZL"
 local SLOT_COUNT = 6
 local currentSelectedSlot = "Config 1"
@@ -394,6 +371,8 @@ local currentRandomMode = "Above"
 local lastRandomChange = 0
 local OFFSET_DISTANCE = Config.OffsetDistance
 local RANDOM_SWITCH_SPEED = Config.RandomSwitchSpeed
+
+-- ADDED MISSING SCAN_SPEED
 local SCAN_SPEED = 0.1 
 
 local MIN_Y_LEVEL = -150 
@@ -669,7 +648,6 @@ refreshPlrBtn.OnClick:Connect(function()
     notify("Player list refreshed!")
 end)
 
-
 mobTab:addText({ text = " " })
 mobTab:addText({ text = "  [ AUTOMATION ]  " })
 
@@ -779,12 +757,10 @@ for _, loc in ipairs(tpLocations) do
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if root then
             task.spawn(function()
-                setAntiFall(root, true)
                 for i = 1, 5 do
                     root.CFrame = CFrame.new(loc.pos)
                     task.wait(0.05)
                 end
-                setAntiFall(root, false)
                 notify("Teleported to " .. loc.name .. "!")
             end)
         end
@@ -831,12 +807,10 @@ teleportToPlayerBtn.OnClick:Connect(function()
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if root then
             task.spawn(function()
-                setAntiFall(root, true)
                 for i = 1, 5 do
                     root.CFrame = CFrame.new(targetPlr.Character.HumanoidRootPart.Position + Vector3.new(0, 3, 0))
                     task.wait(0.05)
                 end
-                setAntiFall(root, false)
                 notify("Teleported to " .. targetPlr.Name .. "!")
             end)
         end
@@ -1097,12 +1071,7 @@ end
 task.spawn(function()
     while true do
         task.wait(0.05)
-        if not isLobbyFarmOn then 
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                setAntiFall(player.Character.HumanoidRootPart, false)
-            end
-            continue 
-        end
+        if not isLobbyFarmOn then continue end
         
         local char = player.Character
         if not char then continue end 
@@ -1143,9 +1112,7 @@ task.spawn(function()
             end
 
             if closestTarget then
-                setAntiFall(root, true)
                 root.CFrame = calculateTargetCFrame(closestTarget)
-                
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
@@ -1156,8 +1123,6 @@ task.spawn(function()
                         isAttacking = false
                     end)
                 end
-            else
-                setAntiFall(root, false)
             end
         end
     end
@@ -1169,12 +1134,7 @@ end)
 task.spawn(function()
     while true do
         task.wait(0.05)
-        if not isMobFarmOn then 
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                setAntiFall(player.Character.HumanoidRootPart, false)
-            end
-            continue 
-        end
+        if not isMobFarmOn then continue end
         
         local hasMobTarget = (selectedMob and selectedMob ~= "None" and selectedMob ~= "")
         local hasPlayerTarget = (selectedPlayerTarget and selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "")
@@ -1231,9 +1191,7 @@ task.spawn(function()
             end
 
             if closestTarget then
-                setAntiFall(root, true)
                 root.CFrame = calculateTargetCFrame(closestTarget)
-                
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
@@ -1244,8 +1202,6 @@ task.spawn(function()
                         isAttacking = false
                     end)
                 end
-            else
-                setAntiFall(root, false)
             end
         end
     end
@@ -1302,12 +1258,7 @@ end
 task.spawn(function()
     while true do
         task.wait(0.5) 
-        if not isConjFarmOn then 
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                setAntiFall(player.Character.HumanoidRootPart, false)
-            end
-            continue 
-        end
+        if not isConjFarmOn then continue end
         
         local char = player.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -1323,12 +1274,10 @@ task.spawn(function()
                 local teleported = false
                 
                 while not teleported and isConjFarmOn do
-                    setAntiFall(root, true)
                     for i = 1, 5 do
                         root.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
                         task.wait(0.1)
                     end
-                    setAntiFall(root, false)
                     
                     local startPos = root.Position
                     
@@ -1358,6 +1307,7 @@ task.spawn(function()
                         keypress(E_KEY) 
                     end
                     
+                    -- ONLY THIS TIMER WAS CHANGED FOR THE YOGA MAT TP FIX
                     while tick() - startTime < 6.5 and isConjFarmOn do
                         task.wait(SCAN_SPEED)
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -1385,7 +1335,6 @@ task.spawn(function()
             if selfHrp and isConjFarmOn then
                 local inArena = false
                 while not inArena and isConjFarmOn do
-                    setAntiFall(player.Character.HumanoidRootPart, true)
                     for i = 1, 5 do
                         local targetCFrame = selfHrp.CFrame * CFrame.new(0, 0, -3)
                         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -1393,7 +1342,6 @@ task.spawn(function()
                         end
                         task.wait(0.05)
                     end
-                    setAntiFall(player.Character.HumanoidRootPart, false)
                     
                     local startPos = player.Character.HumanoidRootPart.Position
                     
@@ -1422,6 +1370,7 @@ task.spawn(function()
                             break
                         end
                         
+                        -- ONLY THIS TIMER WAS CHANGED FOR THE ARENA TP FIX
                         if tick() - startTime > 8.5 then break end
                     end
                     
@@ -1457,7 +1406,6 @@ task.spawn(function()
                 lastSummon = tick()
             end
             
-            setAntiFall(r, true)
             r.CFrame = calculateTargetCFrame(target.hrp)
             
             if not attacking then
@@ -1471,10 +1419,6 @@ task.spawn(function()
                 end)
             end
         end
-        
-        -- Make sure we clean up if the target dies
-        local currentR = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-        if currentR then setAntiFall(currentR, false) end
         
         -- PHASE 4: RETURN
         if isConjFarmOn then
