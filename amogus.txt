@@ -49,10 +49,9 @@ local function cleanKey(key)
 end
 
 -- ==========================================
--- MASTER TOGGLE SYSTEM (F4)
+-- MASTER TOGGLE SYSTEM (F4) - EVENT BASED
 -- ==========================================
 local isMasterToggleOn = true
-local f4WasPressed = false
 local E_KEY = 0x45
 local A_KEY = 0x41
 local D_KEY = 0x44
@@ -62,34 +61,27 @@ local ONE_KEY = 0x31
 local SUMMON_KEY = 0x51
 local ATTACK_KEYS = {}
 
-task.spawn(function()
-    while true do
-        task.wait(0.05)
-        local isPressed = false
-        pcall(function()
-            isPressed = UserInputService:IsKeyDown(Enum.KeyCode.F4)
-        end)
-        
-        if isPressed and not f4WasPressed then
-            f4WasPressed = true
+pcall(function()
+    UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+        if input.KeyCode == Enum.KeyCode.F4 then
             isMasterToggleOn = not isMasterToggleOn
-            notify("Autofarm: " .. (isMasterToggleOn and "RESUMED" or "PAUSED"))
+            notify("Master Toggle: " .. (isMasterToggleOn and "RESUMED" or "STOPPED. Safe to close."))
             
-            -- Safety release keys if paused during an action
-            if not isMasterToggleOn and keyrelease then
+            -- If we just stopped it, instantly release any held keys so you don't get stuck
+            if not isMasterToggleOn then
                 pcall(function()
-                    keyrelease(E_KEY)
-                    keyrelease(A_KEY)
-                    keyrelease(D_KEY)
-                    keyrelease(ONE_KEY)
-                    keyrelease(SUMMON_KEY)
-                    for _, k in ipairs(ATTACK_KEYS) do keyrelease(k) end
+                    if keyrelease then
+                        keyrelease(E_KEY)
+                        keyrelease(A_KEY)
+                        keyrelease(D_KEY)
+                        keyrelease(ONE_KEY)
+                        keyrelease(SUMMON_KEY)
+                        for _, k in ipairs(ATTACK_KEYS) do keyrelease(k) end
+                    end
                 end)
             end
-        elseif not isPressed then
-            f4WasPressed = false
         end
-    end
+    end)
 end)
 
 -- ==============================================================================
@@ -147,6 +139,7 @@ if isHeadless then
         lastSummonTime = tick()
     end
 
+    -- 1. UNIVERSAL AUTO-CLICKER (V5)
     task.spawn(function()
         local PLAY_SCALE_X = 0.5213541666666667
         local PLAY_SCALE_Y = 0.6333002973240832
@@ -172,7 +165,12 @@ if isHeadless then
         local emptyTimer = 0
         while true do
             task.wait(0.5) 
-            if not isMasterToggleOn then continue end
+            
+            -- INSTANT MASTER TOGGLE CHECK
+            if not isMasterToggleOn then 
+                emptyTimer = 0 
+                continue 
+            end
             
             local c = player.Character
             local inGame = c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChildOfClass("Humanoid") and c.Humanoid.Health > 0
@@ -215,9 +213,12 @@ if isHeadless then
         end
     end)
     
+    -- 2. V5 COMBAT & TARGETING LOOP
     task.spawn(function()
         while true do
             task.wait(0.05)
+            
+            -- INSTANT MASTER TOGGLE CHECK
             if not isMasterToggleOn then continue end
             
             local c = player.Character
@@ -246,6 +247,7 @@ if isHeadless then
                 for _, v in ipairs(lf:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
                         local name = v.Name:lower()
+                        -- V5 Specific logic: Targets any mob with a period (.) in front
                         if string.sub(name, 1, 1) == "." then
                             if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
                                 local mh = v:FindFirstChildOfClass("Humanoid")
