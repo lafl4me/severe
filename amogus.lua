@@ -1249,8 +1249,6 @@ local function findCombatTarget()
     local myPos = root.Position
     
     -- [ALTITUDE LOCK]
-    -- The arena is at Y: 23081. If we are below Y: 10000, DO NOT search for combat targets!
-    -- This prevents the script from randomly attacking Boxers near the Gym before teleporting.
     if myPos.Y < 10000 then return nil end
 
     local closestTarget = nil
@@ -1261,7 +1259,6 @@ local function findCombatTarget()
         
         if isWhitelisted(v) then continue end
 
-        -- Skip other actual players
         local isRealPlayer = false
         for _, p in ipairs(Players:GetChildren()) do
             if p:IsA("Player") and p.Character == v then
@@ -1275,7 +1272,6 @@ local function findCombatTarget()
         local targetHrp = v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")
         
         if targetHrp and mobHum and mobHum.Health > 0 then
-            -- Double check the target is also in the sky arena
             if targetHrp.Position.Y > 10000 then
                 local dist = getDistance(myPos, targetHrp.Position)
                 if dist < minDistance then
@@ -1340,7 +1336,6 @@ task.spawn(function()
                         keypress(E_KEY) 
                     end
                     
-                    -- Wait condition updated to 5.5s timeout to handle lag
                     while tick() - startTime < 5.5 and isConjFarmOn do
                         task.wait(0.1) 
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -1403,7 +1398,6 @@ task.spawn(function()
                             break
                         end
                         
-                        -- Match the wait scale of Phase 1 to permit enough loading time
                         if tick() - startTime > 8.5 then break end
                     end
                     
@@ -1420,15 +1414,19 @@ task.spawn(function()
 
         -- PHASE 3: COMBAT
         local target = nil
+        local waitBoss = tick()
         while not target and isConjFarmOn do
             target = findCombatTarget()
             task.wait(0.1)
+            -- Failsafe: Prevent freezing if the boss fails to spawn
+            if tick() - waitBoss > 15 then break end
         end
         
         local lastSummon = 0
         local attacking = false
         
-        while target and target.hum.Health > 0 and isConjFarmOn do
+        -- Fortified condition to ensure the target actually exists in Workspace
+        while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn do
             task.wait(0.05)
             local c = player.Character
             local r = c and c:FindFirstChild("HumanoidRootPart")
@@ -1453,15 +1451,16 @@ task.spawn(function()
             end
         end
         
-        -- PHASE 4: RETURN
+        -- PHASE 4: RETURN (Altitude Fix)
         if isConjFarmOn then
-            local combatPos = player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character.HumanoidRootPart.Position or Vector3.zero
+            local returnTimer = tick()
             repeat
                 task.wait(0.5)
-                local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            until not isConjFarmOn or (curHrp and getDistance(curHrp.Position, combatPos) >= 40) 
-            task.wait(0.5)
+                local curChar = player.Character
+                local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
+                -- We know we have returned to the gym when our Y position falls out of the sky
+            until not isConjFarmOn or not curHrp or curHrp.Position.Y < 10000 or (tick() - returnTimer > 15)
+            task.wait(1)
         end
     end
 end)
-
