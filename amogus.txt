@@ -2,6 +2,7 @@
 local Players = game:GetService("Players")
 local workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 -- Safe Loading Check
 local player = Players.LocalPlayer
@@ -363,6 +364,7 @@ if not Config.TargetPlayer then Config.TargetPlayer = "None" end
 local isLobbyFarmOn = false
 local isConjFarmOn = false
 local isMobFarmOn = false
+local lastEnabledFarm = "Conjuration" -- Tracks which farm to enable on F4 toggle
 
 local hitPosition = Config.HitPosition
 local currentRandomMode = "Above"
@@ -1024,6 +1026,9 @@ end)
 -- LIVE BOT STATE MONITOR
 -- ==========================================
 setTab:addText({ text = " " }) 
+setTab:addText({ text = "  [ HOTKEYS ]  " })
+setTab:addText({ text = "Press F4 to Start/Stop Autofarm" })
+setTab:addText({ text = " " })
 setTab:addText({ text = "  [ LIVE BOT STATE ]  " })
 liveState1 = setTab:addText({ text = "Position: " .. tostring(Config.HitPosition) .. " | Dist: " .. tostring(Config.OffsetDistance) .. " | Delay: " .. tostring(Config.RandomSwitchSpeed) .. "s" })
 liveState2 = setTab:addText({ text = "Stand Key: " .. tostring(Config.SummonKeyStr) .. " | Atk Keys: [" .. table.concat(Config.AttackKeyStrs, ", ") .. "]" })
@@ -1038,6 +1043,45 @@ if AutoLoadedName then
         notify(AutoLoadedName .. " auto-loaded on launch!")
     end)
 end
+
+-- ==========================================
+-- AUTOFARM HOTKEY (F4 TOGGLE)
+-- ==========================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.F4 then
+        if isLobbyFarmOn or isMobFarmOn or isConjFarmOn then
+            -- Save current state before disabling
+            if isLobbyFarmOn then lastEnabledFarm = "Randomized" end
+            if isMobFarmOn then lastEnabledFarm = "Target" end
+            if isConjFarmOn then lastEnabledFarm = "Conjuration" end
+            
+            isLobbyFarmOn = false
+            isMobFarmOn = false
+            isConjFarmOn = false
+            
+            -- Sync UI Elements
+            UpdateUIElement(lobbyCheck, false)
+            UpdateUIElement(mobCheck, false)
+            UpdateUIElement(conjCheck, false)
+            
+            notify("Autofarm: PAUSED")
+        else
+            -- Re-enable the previously active farm
+            if lastEnabledFarm == "Randomized" then 
+                isLobbyFarmOn = true
+                UpdateUIElement(lobbyCheck, true) 
+            elseif lastEnabledFarm == "Target" then 
+                isMobFarmOn = true
+                UpdateUIElement(mobCheck, true) 
+            elseif lastEnabledFarm == "Conjuration" then 
+                isConjFarmOn = true
+                UpdateUIElement(conjCheck, true) 
+            end
+            
+            notify("Autofarm: RESUMED (" .. lastEnabledFarm .. ")")
+        end
+    end
+end)
 
 -- ==========================================
 -- SHARED COMBAT HELPERS 
@@ -1425,7 +1469,6 @@ task.spawn(function()
         local lastSummon = 0
         local attacking = false
         
-        -- Fortified condition to ensure the target actually exists in Workspace
         while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn do
             task.wait(0.05)
             local c = player.Character
@@ -1458,7 +1501,6 @@ task.spawn(function()
                 task.wait(0.5)
                 local curChar = player.Character
                 local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
-                -- We know we have returned to the gym when our Y position falls out of the sky
             until not isConjFarmOn or not curHrp or curHrp.Position.Y < 10000 or (tick() - returnTimer > 15)
             task.wait(1)
         end
