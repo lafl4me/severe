@@ -48,6 +48,50 @@ local function cleanKey(key)
     return upperKey
 end
 
+-- ==========================================
+-- MASTER TOGGLE SYSTEM (F4)
+-- ==========================================
+local isMasterToggleOn = true
+local f4WasPressed = false
+local E_KEY = 0x45
+local A_KEY = 0x41
+local D_KEY = 0x44
+local ONE_KEY = 0x31
+
+-- Forward declaration for safety releases
+local SUMMON_KEY = 0x51
+local ATTACK_KEYS = {}
+
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        local isPressed = false
+        pcall(function()
+            isPressed = UserInputService:IsKeyDown(Enum.KeyCode.F4)
+        end)
+        
+        if isPressed and not f4WasPressed then
+            f4WasPressed = true
+            isMasterToggleOn = not isMasterToggleOn
+            notify("Autofarm: " .. (isMasterToggleOn and "RESUMED" or "PAUSED"))
+            
+            -- Safety release keys if paused during an action
+            if not isMasterToggleOn and keyrelease then
+                pcall(function()
+                    keyrelease(E_KEY)
+                    keyrelease(A_KEY)
+                    keyrelease(D_KEY)
+                    keyrelease(ONE_KEY)
+                    keyrelease(SUMMON_KEY)
+                    for _, k in ipairs(ATTACK_KEYS) do keyrelease(k) end
+                end)
+            end
+        elseif not isPressed then
+            f4WasPressed = false
+        end
+    end
+end)
+
 -- ==============================================================================
 -- HEADLESS V5 AUTOFARM ENGINE (Triggered via _G.Settings)
 -- ==============================================================================
@@ -73,8 +117,8 @@ if isHeadless then
     local attackKeyStrs = {}
     for _, k in ipairs(rawAttackStrs) do table.insert(attackKeyStrs, cleanKey(k)) end
     
-    local SUMMON_KEY = KEY_MAP[summonKeyStr] or 0x51
-    local ATTACK_KEYS = {}
+    SUMMON_KEY = KEY_MAP[summonKeyStr] or 0x51
+    ATTACK_KEYS = {}
     for _, str in ipairs(attackKeyStrs) do
         if KEY_MAP[str] then table.insert(ATTACK_KEYS, KEY_MAP[str]) end
     end
@@ -128,6 +172,8 @@ if isHeadless then
         local emptyTimer = 0
         while true do
             task.wait(0.5) 
+            if not isMasterToggleOn then continue end
+            
             local c = player.Character
             local inGame = c and c:FindFirstChild("HumanoidRootPart") and c:FindFirstChildOfClass("Humanoid") and c.Humanoid.Health > 0
             
@@ -172,6 +218,8 @@ if isHeadless then
     task.spawn(function()
         while true do
             task.wait(0.05)
+            if not isMasterToggleOn then continue end
+            
             local c = player.Character
             if not c then continue end 
             local root = c:FindFirstChild("HumanoidRootPart")
@@ -181,6 +229,7 @@ if isHeadless then
             if c ~= lastKnownChar then
                 lastKnownChar = c
                 task.wait(2.5) 
+                if not isMasterToggleOn then continue end
                 forceSummon()
             end
 
@@ -364,7 +413,6 @@ if not Config.TargetPlayer then Config.TargetPlayer = "None" end
 local isLobbyFarmOn = false
 local isConjFarmOn = false
 local isMobFarmOn = false
-local lastEnabledFarm = "Conjuration" -- Tracks which farm to enable on F4 toggle
 
 local hitPosition = Config.HitPosition
 local currentRandomMode = "Above"
@@ -377,13 +425,8 @@ local MAX_DISTANCE = 2500
 local selectedMob = "None"
 local selectedPlayerTarget = Config.TargetPlayer or "None"
 
-local E_KEY = 0x45
-local A_KEY = 0x41
-local D_KEY = 0x44
-local ONE_KEY = 0x31
-
-local SUMMON_KEY = KEY_MAP[Config.SummonKeyStr] or 0x51
-local ATTACK_KEYS = {}
+SUMMON_KEY = KEY_MAP[Config.SummonKeyStr] or 0x51
+ATTACK_KEYS = {}
 for _, str in ipairs(Config.AttackKeyStrs) do
     if KEY_MAP[str] then table.insert(ATTACK_KEYS, KEY_MAP[str]) end
 end
@@ -527,7 +570,7 @@ UI.setTheme({
 })
 
 local win = UI.createWindow({ 
-    title = "Bizarre Lineage Hub | Instert cheesy bread:",
+    title = "Bizarre Lineage Hub | Pause Key: F4",
     size = Vector2.new(450, 500)
 })
 
@@ -1026,9 +1069,6 @@ end)
 -- LIVE BOT STATE MONITOR
 -- ==========================================
 setTab:addText({ text = " " }) 
-setTab:addText({ text = "  [ HOTKEYS ]  " })
-setTab:addText({ text = "Press F4 to Start/Stop Autofarm" })
-setTab:addText({ text = " " })
 setTab:addText({ text = "  [ LIVE BOT STATE ]  " })
 liveState1 = setTab:addText({ text = "Position: " .. tostring(Config.HitPosition) .. " | Dist: " .. tostring(Config.OffsetDistance) .. " | Delay: " .. tostring(Config.RandomSwitchSpeed) .. "s" })
 liveState2 = setTab:addText({ text = "Stand Key: " .. tostring(Config.SummonKeyStr) .. " | Atk Keys: [" .. table.concat(Config.AttackKeyStrs, ", ") .. "]" })
@@ -1043,45 +1083,6 @@ if AutoLoadedName then
         notify(AutoLoadedName .. " auto-loaded on launch!")
     end)
 end
-
--- ==========================================
--- AUTOFARM HOTKEY (F4 TOGGLE)
--- ==========================================
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if input.KeyCode == Enum.KeyCode.F4 then
-        if isLobbyFarmOn or isMobFarmOn or isConjFarmOn then
-            -- Save current state before disabling
-            if isLobbyFarmOn then lastEnabledFarm = "Randomized" end
-            if isMobFarmOn then lastEnabledFarm = "Target" end
-            if isConjFarmOn then lastEnabledFarm = "Conjuration" end
-            
-            isLobbyFarmOn = false
-            isMobFarmOn = false
-            isConjFarmOn = false
-            
-            -- Sync UI Elements
-            UpdateUIElement(lobbyCheck, false)
-            UpdateUIElement(mobCheck, false)
-            UpdateUIElement(conjCheck, false)
-            
-            notify("Autofarm: PAUSED")
-        else
-            -- Re-enable the previously active farm
-            if lastEnabledFarm == "Randomized" then 
-                isLobbyFarmOn = true
-                UpdateUIElement(lobbyCheck, true) 
-            elseif lastEnabledFarm == "Target" then 
-                isMobFarmOn = true
-                UpdateUIElement(mobCheck, true) 
-            elseif lastEnabledFarm == "Conjuration" then 
-                isConjFarmOn = true
-                UpdateUIElement(conjCheck, true) 
-            end
-            
-            notify("Autofarm: RESUMED (" .. lastEnabledFarm .. ")")
-        end
-    end
-end)
 
 -- ==========================================
 -- SHARED COMBAT HELPERS 
@@ -1143,7 +1144,7 @@ end
 task.spawn(function()
     while true do
         task.wait(0.05)
-        if not isLobbyFarmOn then continue end
+        if not isLobbyFarmOn or not isMasterToggleOn then continue end
         
         local char = player.Character
         if not char then continue end 
@@ -1206,7 +1207,7 @@ end)
 task.spawn(function()
     while true do
         task.wait(0.05)
-        if not isMobFarmOn then continue end
+        if not isMobFarmOn or not isMasterToggleOn then continue end
         
         local hasMobTarget = (selectedMob and selectedMob ~= "None" and selectedMob ~= "")
         local hasPlayerTarget = (selectedPlayerTarget and selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "")
@@ -1331,7 +1332,7 @@ end
 task.spawn(function()
     while true do
         task.wait(0.5) 
-        if not isConjFarmOn then continue end
+        if not isConjFarmOn or not isMasterToggleOn then continue end
         
         local char = player.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -1343,10 +1344,10 @@ task.spawn(function()
             local meditation = map and map:FindFirstChild("Meditation")
             local yogaMat = meditation and meditation:FindFirstChild("Yoga Mat")
             
-            if yogaMat and isConjFarmOn then
+            if yogaMat and isConjFarmOn and isMasterToggleOn then
                 local teleported = false
                 
-                while not teleported and isConjFarmOn do
+                while not teleported and isConjFarmOn and isMasterToggleOn do
                     for i = 1, 5 do
                         root.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
                         task.wait(0.1)
@@ -1354,7 +1355,7 @@ task.spawn(function()
                     
                     local startPos = root.Position
                     
-                    if keypress and isConjFarmOn then
+                    if keypress and isConjFarmOn and isMasterToggleOn then
                         keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                         task.wait(0.05)
                         keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
@@ -1363,7 +1364,7 @@ task.spawn(function()
                     
                     local camLockActive = true
                     task.spawn(function()
-                        while camLockActive and isConjFarmOn do
+                        while camLockActive and isConjFarmOn and isMasterToggleOn do
                             task.wait()
                             local cam = workspace.CurrentCamera
                             local c = player.Character
@@ -1375,12 +1376,12 @@ task.spawn(function()
                     end)
                     
                     local startTime = tick()
-                    if keypress and isConjFarmOn then 
+                    if keypress and isConjFarmOn and isMasterToggleOn then 
                         keypress(E_KEY); task.wait(0.1); keyrelease(E_KEY); task.wait(0.1)
                         keypress(E_KEY) 
                     end
                     
-                    while tick() - startTime < 5.5 and isConjFarmOn do
+                    while tick() - startTime < 5.5 and isConjFarmOn and isMasterToggleOn do
                         task.wait(0.1) 
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                         if currentHrp and getDistance(currentHrp.Position, startPos) >= 40 then
@@ -1397,16 +1398,16 @@ task.spawn(function()
                 task.wait(0.5)
             end
 
-            if not isConjFarmOn then continue end
+            if not isConjFarmOn or not isMasterToggleOn then continue end
 
             -- PHASE 2: THE SELF
             local npcs = workspace:FindFirstChild("Npcs")
             local theSelf = npcs and npcs:FindFirstChild("The Self")
             local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart")
             
-            if selfHrp and isConjFarmOn then
+            if selfHrp and isConjFarmOn and isMasterToggleOn then
                 local inArena = false
-                while not inArena and isConjFarmOn do
+                while not inArena and isConjFarmOn and isMasterToggleOn do
                     for i = 1, 5 do
                         local targetCFrame = selfHrp.CFrame * CFrame.new(0, 0, -3)
                         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -1417,7 +1418,7 @@ task.spawn(function()
                     
                     local startPos = player.Character.HumanoidRootPart.Position
                     
-                    if keypress and isConjFarmOn then
+                    if keypress and isConjFarmOn and isMasterToggleOn then
                         keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                         task.wait(0.05)
                         keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
@@ -1425,10 +1426,10 @@ task.spawn(function()
                     task.wait(0.2)
                     
                     local startTime = tick()
-                    if keypress and isConjFarmOn then keypress(E_KEY) end
+                    if keypress and isConjFarmOn and isMasterToggleOn then keypress(E_KEY) end
                     task.wait(1.5) 
                     
-                    while isConjFarmOn do
+                    while isConjFarmOn and isMasterToggleOn do
                         task.wait(0.05)
                         if keypress then
                             keypress(ONE_KEY)
@@ -1454,22 +1455,21 @@ task.spawn(function()
             end
         end
 
-        if not isConjFarmOn then continue end
+        if not isConjFarmOn or not isMasterToggleOn then continue end
 
         -- PHASE 3: COMBAT
         local target = nil
         local waitBoss = tick()
-        while not target and isConjFarmOn do
+        while not target and isConjFarmOn and isMasterToggleOn do
             target = findCombatTarget()
             task.wait(0.1)
-            -- Failsafe: Prevent freezing if the boss fails to spawn
             if tick() - waitBoss > 15 then break end
         end
         
         local lastSummon = 0
         local attacking = false
         
-        while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn do
+        while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn and isMasterToggleOn do
             task.wait(0.05)
             local c = player.Character
             local r = c and c:FindFirstChild("HumanoidRootPart")
@@ -1494,14 +1494,14 @@ task.spawn(function()
             end
         end
         
-        -- PHASE 4: RETURN (Altitude Fix)
-        if isConjFarmOn then
+        -- PHASE 4: RETURN 
+        if isConjFarmOn and isMasterToggleOn then
             local returnTimer = tick()
             repeat
                 task.wait(0.5)
                 local curChar = player.Character
                 local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
-            until not isConjFarmOn or not curHrp or curHrp.Position.Y < 10000 or (tick() - returnTimer > 15)
+            until not isConjFarmOn or not isMasterToggleOn or not curHrp or curHrp.Position.Y < 10000 or (tick() - returnTimer > 15)
             task.wait(1)
         end
     end
