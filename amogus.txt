@@ -247,7 +247,6 @@ if isHeadless then
                 for _, v in ipairs(lf:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
                         local name = v.Name:lower()
-                        -- V5 Specific logic: Targets any mob with a period (.) in front
                         if string.sub(name, 1, 1) == "." then
                             if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
                                 local mh = v:FindFirstChildOfClass("Humanoid")
@@ -1383,7 +1382,8 @@ task.spawn(function()
                         keypress(E_KEY) 
                     end
                     
-                    while tick() - startTime < 5.5 and isConjFarmOn and isMasterToggleOn do
+                    -- TIMEOUT INCREASED TO 25 SECONDS
+                    while tick() - startTime < 25 and isConjFarmOn and isMasterToggleOn do
                         task.wait(0.1) 
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                         if currentHrp and getDistance(currentHrp.Position, startPos) >= 40 then
@@ -1431,6 +1431,7 @@ task.spawn(function()
                     if keypress and isConjFarmOn and isMasterToggleOn then keypress(E_KEY) end
                     task.wait(1.5) 
                     
+                    -- TIMEOUT INCREASED TO 25 SECONDS
                     while isConjFarmOn and isMasterToggleOn do
                         task.wait(0.05)
                         if keypress then
@@ -1445,7 +1446,7 @@ task.spawn(function()
                             break
                         end
                         
-                        if tick() - startTime > 8.5 then break end
+                        if tick() - startTime > 25 then break end
                     end
                     
                     if keyrelease then 
