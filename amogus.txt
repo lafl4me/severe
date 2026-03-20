@@ -57,7 +57,6 @@ local A_KEY = 0x41
 local D_KEY = 0x44
 local ONE_KEY = 0x31
 
--- Forward declaration for safety releases
 local SUMMON_KEY = 0x51
 local ATTACK_KEYS = {}
 
@@ -67,7 +66,6 @@ pcall(function()
             isMasterToggleOn = not isMasterToggleOn
             notify("Master Toggle: " .. (isMasterToggleOn and "RESUMED" or "STOPPED. Safe to close."))
             
-            -- If we just stopped it, instantly release any held keys so you don't get stuck
             if not isMasterToggleOn then
                 pcall(function()
                     if keyrelease then
@@ -84,8 +82,21 @@ pcall(function()
     end)
 end)
 
+-- ==========================================
+-- CORE SAFETY VALIDATOR
+-- ==========================================
+local function isSafe()
+    if not isMasterToggleOn then return false end
+    local c = player.Character
+    if not c then return false end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    local r = c:FindFirstChild("HumanoidRootPart")
+    if not h or not r or h.Health <= 0 then return false end
+    return true
+end
+
 -- ==============================================================================
--- HEADLESS V5 AUTOFARM ENGINE (Triggered via _G.Settings)
+-- HEADLESS V5 AUTOFARM ENGINE
 -- ==============================================================================
 local isHeadless = false
 if _G.Settings and type(_G.Settings) == "table" and _G.Settings.autofarm then
@@ -131,6 +142,7 @@ if isHeadless then
     end
     
     local function forceSummon()
+        if not isSafe() then return end
         if keypress then
             keypress(SUMMON_KEY)
             task.wait(0.1 + (math.random() * 0.05))
@@ -139,7 +151,6 @@ if isHeadless then
         lastSummonTime = tick()
     end
 
-    -- 1. UNIVERSAL AUTO-CLICKER (V5)
     task.spawn(function()
         local PLAY_SCALE_X = 0.5213541666666667
         local PLAY_SCALE_Y = 0.6333002973240832
@@ -166,7 +177,6 @@ if isHeadless then
         while true do
             task.wait(0.5) 
             
-            -- INSTANT MASTER TOGGLE CHECK
             if not isMasterToggleOn then 
                 emptyTimer = 0 
                 continue 
@@ -213,24 +223,19 @@ if isHeadless then
         end
     end)
     
-    -- 2. V5 COMBAT & TARGETING LOOP
     task.spawn(function()
         while true do
             task.wait(0.05)
             
-            -- INSTANT MASTER TOGGLE CHECK
-            if not isMasterToggleOn then continue end
+            if not isSafe() then continue end
             
             local c = player.Character
-            if not c then continue end 
             local root = c:FindFirstChild("HumanoidRootPart")
-            local hum = c:FindFirstChildOfClass("Humanoid")
-            if not root or not hum or hum.Health <= 0 then continue end
             
             if c ~= lastKnownChar then
                 lastKnownChar = c
                 task.wait(2.5) 
-                if not isMasterToggleOn then continue end
+                if not isSafe() then continue end
                 forceSummon()
             end
 
@@ -247,7 +252,6 @@ if isHeadless then
                 for _, v in ipairs(lf:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
                         local name = v.Name:lower()
-                        -- V5 Specific logic: Targets any mob with a period (.) in front
                         if string.sub(name, 1, 1) == "." then
                             if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
                                 local mh = v:FindFirstChildOfClass("Humanoid")
@@ -255,10 +259,7 @@ if isHeadless then
                                     local hrp = v.HumanoidRootPart
                                     local tPos = hrp.Position
                                     if tPos.Y >= MIN_Y_LEVEL then
-                                        local dx = myPos.X - tPos.X
-                                        local dy = myPos.Y - tPos.Y
-                                        local dz = myPos.Z - tPos.Z
-                                        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                                        local dist = getDistance(myPos, tPos)
                                         if dist < minDistance and dist < MAX_DISTANCE then
                                             minDistance = dist
                                             closestTarget = hrp
@@ -270,7 +271,7 @@ if isHeadless then
                     end
                 end
                 
-                if closestTarget then
+                if closestTarget and isSafe() then
                     local pos = closestTarget.Position
                     local look = closestTarget.CFrame.LookVector
                     local mode = hitPosition
@@ -299,16 +300,11 @@ if isHeadless then
                     if not isAttacking then
                         isAttacking = true
                         task.spawn(function()
-                            if mouse1press then 
-                                mouse1press()
-                                task.wait(0.01 + (math.random() * 0.02)) 
-                                mouse1release() 
-                            end
+                            if mouse1press then mouse1press(); task.wait(0.01 + (math.random() * 0.02)); mouse1release() end
                             if keypress then
                                 for _, k in ipairs(ATTACK_KEYS) do 
-                                    keypress(k)
-                                    task.wait(0.01 + (math.random() * 0.01))
-                                    keyrelease(k)
+                                    if not isSafe() then break end
+                                    keypress(k); task.wait(0.01 + (math.random() * 0.01)); keyrelease(k) 
                                 end
                             end
                             isAttacking = false
@@ -813,11 +809,12 @@ local tpLocations = {
 for _, loc in ipairs(tpLocations) do
     local btn = tpTab:addButton({ text = loc.name })
     btn.OnClick:Connect(function()
-        local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not isSafe() then return end
+        local root = player.Character:FindFirstChild("HumanoidRootPart")
         if root then
             task.spawn(function()
                 for i = 1, 5 do
+                    if not isSafe() then break end
                     root.CFrame = CFrame.new(loc.pos)
                     task.wait(0.05)
                 end
@@ -862,12 +859,12 @@ teleportToPlayerBtn.OnClick:Connect(function()
     end
     
     local targetPlr = Players:FindFirstChild(selectedTpPlayer)
-    if targetPlr and targetPlr.Character and targetPlr.Character:FindFirstChild("HumanoidRootPart") then
-        local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
+    if targetPlr and targetPlr.Character and targetPlr.Character:FindFirstChild("HumanoidRootPart") and isSafe() then
+        local root = player.Character:FindFirstChild("HumanoidRootPart")
         if root then
             task.spawn(function()
                 for i = 1, 5 do
+                    if not isSafe() then break end
                     root.CFrame = CFrame.new(targetPlr.Character.HumanoidRootPart.Position + Vector3.new(0, 3, 0))
                     task.wait(0.05)
                 end
@@ -1096,6 +1093,7 @@ local function isStandOut(char)
 end
 
 local function forceSummon()
+    if not isSafe() then return end
     if keypress then
         keypress(SUMMON_KEY)
         task.wait(0.1 + (math.random() * 0.05))
@@ -1146,14 +1144,10 @@ end
 task.spawn(function()
     while true do
         task.wait(0.05)
-        if not isLobbyFarmOn or not isMasterToggleOn then continue end
+        if not isLobbyFarmOn or not isSafe() then continue end
         
         local char = player.Character
-        if not char then continue end 
-        
         local root = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not root or not hum or hum.Health <= 0 then continue end
         
         if not isStandOut(char) and (tick() - lastSummonTime) > 3 then forceSummon() end
 
@@ -1186,14 +1180,17 @@ task.spawn(function()
                 end
             end
 
-            if closestTarget then
+            if closestTarget and isSafe() then
                 root.CFrame = calculateTargetCFrame(closestTarget)
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
                         if mouse1press then mouse1press(); task.wait(0.01 + math.random()*0.02); mouse1release() end
                         if keypress then
-                            for _, k in ipairs(ATTACK_KEYS) do keypress(k); task.wait(0.01 + math.random()*0.01); keyrelease(k) end
+                            for _, k in ipairs(ATTACK_KEYS) do 
+                                if not isSafe() then break end
+                                keypress(k); task.wait(0.01 + math.random()*0.01); keyrelease(k) 
+                            end
                         end
                         isAttacking = false
                     end)
@@ -1209,7 +1206,7 @@ end)
 task.spawn(function()
     while true do
         task.wait(0.05)
-        if not isMobFarmOn or not isMasterToggleOn then continue end
+        if not isMobFarmOn or not isSafe() then continue end
         
         local hasMobTarget = (selectedMob and selectedMob ~= "None" and selectedMob ~= "")
         local hasPlayerTarget = (selectedPlayerTarget and selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "")
@@ -1217,11 +1214,7 @@ task.spawn(function()
         if not hasMobTarget and not hasPlayerTarget then continue end
         
         local char = player.Character
-        if not char then continue end 
-        
         local root = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not root or not hum or hum.Health <= 0 then continue end
         
         if not isStandOut(char) and (tick() - lastSummonTime) > 3 then forceSummon() end
 
@@ -1265,14 +1258,17 @@ task.spawn(function()
                 end
             end
 
-            if closestTarget then
+            if closestTarget and isSafe() then
                 root.CFrame = calculateTargetCFrame(closestTarget)
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
                         if mouse1press then mouse1press(); task.wait(0.01 + math.random()*0.02); mouse1release() end
                         if keypress then
-                            for _, k in ipairs(ATTACK_KEYS) do keypress(k); task.wait(0.01 + math.random()*0.01); keyrelease(k) end
+                            for _, k in ipairs(ATTACK_KEYS) do 
+                                if not isSafe() then break end
+                                keypress(k); task.wait(0.01 + math.random()*0.01); keyrelease(k) 
+                            end
                         end
                         isAttacking = false
                     end)
@@ -1294,17 +1290,13 @@ local function findCombatTarget()
     if not root then return nil end
     
     local myPos = root.Position
-    
-    -- [ALTITUDE LOCK]
     if myPos.Y < 10000 then return nil end
 
     local closestTarget = nil
     local minDistance = 500 
 
     for _, v in ipairs(liveFolder:GetChildren()) do
-        -- ONLY exclude our actual character. Do NOT exclude by name anymore!
         if not v or v == char then continue end
-        
         if isWhitelisted(v) then continue end
 
         local isRealPlayer = false
@@ -1335,11 +1327,7 @@ end
 task.spawn(function()
     while true do
         task.wait(0.5) 
-        if not isConjFarmOn or not isMasterToggleOn then continue end
-        
-        local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if not root or char.Humanoid.Health <= 0 then continue end
+        if not isConjFarmOn or not isSafe() then continue end
 
         if not (findCombatTarget() ~= nil) then
             -- PHASE 1: YOGA MAT
@@ -1347,31 +1335,28 @@ task.spawn(function()
             local meditation = map and map:FindFirstChild("Meditation")
             local yogaMat = meditation and meditation:FindFirstChild("Yoga Mat")
             
-            if yogaMat and isConjFarmOn and isMasterToggleOn then
+            if yogaMat and isConjFarmOn and isSafe() then
                 local teleported = false
                 
-                while not teleported and isConjFarmOn and isMasterToggleOn do
+                while not teleported and isConjFarmOn and isSafe() do
+                    if not yogaMat or not yogaMat.Parent then break end 
                     
-                    -- [LAG FIX] VERIFIED TELEPORT TO YOGA MAT
                     local tpTimeout1 = tick()
-                    while isConjFarmOn and isMasterToggleOn do
-                        local curRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                        if not curRoot then break end
-                        
-                        -- Keep pushing CFrame until server confirms we are within 10 studs of the mat
+                    while isConjFarmOn and isSafe() do
+                        local curRoot = player.Character.HumanoidRootPart
                         if getDistance(curRoot.Position, yogaMat.Position) < 10 then break end
                         
                         curRoot.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
                         task.wait(0.1)
                         if tick() - tpTimeout1 > 10 then break end
                     end
-                    task.wait(0.5) -- Wait for laggy clients/servers to fully sync before pressing E
                     
-                    local curRootAfter1 = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if not curRootAfter1 then break end
-                    local startPos = curRootAfter1.Position
+                    if not isSafe() then break end
+                    task.wait(0.5) 
                     
-                    if keypress and isConjFarmOn and isMasterToggleOn then
+                    local startPos = player.Character.HumanoidRootPart.Position
+                    
+                    if keypress and isSafe() then
                         keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                         task.wait(0.05)
                         keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
@@ -1380,26 +1365,26 @@ task.spawn(function()
                     
                     local camLockActive = true
                     task.spawn(function()
-                        while camLockActive and isConjFarmOn and isMasterToggleOn do
+                        while camLockActive and isConjFarmOn and isSafe() do
                             task.wait()
                             local cam = workspace.CurrentCamera
                             local c = player.Character
                             local head = c and c:FindFirstChild("Head")
-                            if cam and head and yogaMat then
+                            if cam and head and yogaMat and yogaMat.Parent then
                                 cam.CFrame = CFrame.lookAt(head.Position + Vector3.new(0, 2, 5), yogaMat.Position)
                             end
                         end
                     end)
                     
                     local startTime = tick()
-                    if keypress and isConjFarmOn and isMasterToggleOn then 
+                    if keypress and isSafe() then 
                         keypress(E_KEY); task.wait(0.1); keyrelease(E_KEY); task.wait(0.1)
                         keypress(E_KEY) 
                     end
                     
-                    while tick() - startTime < 25 and isConjFarmOn and isMasterToggleOn do
+                    while tick() - startTime < 25 and isConjFarmOn and isSafe() do
                         task.wait(0.1) 
-                        local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                        local currentHrp = player.Character:FindFirstChild("HumanoidRootPart")
                         if currentHrp and getDistance(currentHrp.Position, startPos) >= 40 then
                             teleported = true
                             break
@@ -1414,38 +1399,35 @@ task.spawn(function()
                 task.wait(0.5)
             end
 
-            if not isConjFarmOn or not isMasterToggleOn then continue end
+            if not isConjFarmOn or not isSafe() then continue end
 
             -- PHASE 2: THE SELF
             local npcs = workspace:FindFirstChild("Npcs")
             local theSelf = npcs and npcs:FindFirstChild("The Self")
             local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart")
             
-            if selfHrp and isConjFarmOn and isMasterToggleOn then
+            if selfHrp and isConjFarmOn and isSafe() then
                 local inArena = false
-                while not inArena and isConjFarmOn and isMasterToggleOn do
+                while not inArena and isConjFarmOn and isSafe() do
+                    if not selfHrp or not selfHrp.Parent then break end 
                     
-                    -- [LAG FIX] VERIFIED TELEPORT TO THE SELF
                     local targetCFrame = selfHrp.CFrame * CFrame.new(0, 0, -3)
                     local tpTimeout2 = tick()
-                    while isConjFarmOn and isMasterToggleOn do
-                        local curRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                        if not curRoot then break end
-                        
-                        -- Keep pushing CFrame until server confirms we are strictly within 10 studs
+                    while isConjFarmOn and isSafe() do
+                        local curRoot = player.Character.HumanoidRootPart
                         if getDistance(curRoot.Position, targetCFrame.Position) < 10 then break end
                         
                         curRoot.CFrame = CFrame.lookAt(targetCFrame.Position, selfHrp.Position)
                         task.wait(0.1)
                         if tick() - tpTimeout2 > 10 then break end
                     end
-                    task.wait(0.5) -- Wait for laggy clients/servers to fully sync before pressing E
                     
-                    local curRootAfter2 = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if not curRootAfter2 then break end
-                    local startPos = curRootAfter2.Position
+                    if not isSafe() then break end
+                    task.wait(0.5) 
                     
-                    if keypress and isConjFarmOn and isMasterToggleOn then
+                    local startPos = player.Character.HumanoidRootPart.Position
+                    
+                    if keypress and isSafe() then
                         keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                         task.wait(0.05)
                         keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
@@ -1453,10 +1435,10 @@ task.spawn(function()
                     task.wait(0.2)
                     
                     local startTime = tick()
-                    if keypress and isConjFarmOn and isMasterToggleOn then keypress(E_KEY) end
+                    if keypress and isSafe() then keypress(E_KEY) end
                     task.wait(1.5) 
                     
-                    while isConjFarmOn and isMasterToggleOn do
+                    while isConjFarmOn and isSafe() do
                         task.wait(0.05)
                         if keypress then
                             keypress(ONE_KEY)
@@ -1464,7 +1446,7 @@ task.spawn(function()
                             keyrelease(ONE_KEY)
                         end
                         
-                        local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                        local curHrp = player.Character:FindFirstChild("HumanoidRootPart")
                         if (curHrp and getDistance(curHrp.Position, startPos) >= 40) or findCombatTarget() then
                             inArena = true
                             break
@@ -1482,12 +1464,12 @@ task.spawn(function()
             end
         end
 
-        if not isConjFarmOn or not isMasterToggleOn then continue end
+        if not isConjFarmOn or not isSafe() then continue end
 
         -- PHASE 3: COMBAT
         local target = nil
         local waitBoss = tick()
-        while not target and isConjFarmOn and isMasterToggleOn do
+        while not target and isConjFarmOn and isSafe() do
             target = findCombatTarget()
             task.wait(0.1)
             if tick() - waitBoss > 30 then break end
@@ -1496,25 +1478,30 @@ task.spawn(function()
         local lastSummon = 0
         local attacking = false
         
-        while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn and isMasterToggleOn do
+        while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn and isSafe() do
             task.wait(0.05)
+            
             local c = player.Character
-            local r = c and c:FindFirstChild("HumanoidRootPart")
-            if not r or not c:FindFirstChild("Humanoid") or c.Humanoid.Health <= 0 then break end
+            local r = c.HumanoidRootPart
             
             if not isStandOut(c) and (tick() - lastSummon) > 3 then
                 if keypress then keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY) end
                 lastSummon = tick()
             end
             
-            r.CFrame = calculateTargetCFrame(target.hrp)
+            if target.hrp and target.hrp.Parent then
+                r.CFrame = calculateTargetCFrame(target.hrp)
+            end
             
             if not attacking then
                 attacking = true
                 task.spawn(function()
                     if mouse1press then mouse1press(); task.wait(0.01); mouse1release() end
                     if keypress then
-                        for _, k in ipairs(ATTACK_KEYS) do keypress(k); task.wait(0.01); keyrelease(k) end
+                        for _, k in ipairs(ATTACK_KEYS) do 
+                            if not isSafe() then break end
+                            keypress(k); task.wait(0.01); keyrelease(k) 
+                        end
                     end
                     attacking = false
                 end)
@@ -1522,13 +1509,13 @@ task.spawn(function()
         end
         
         -- PHASE 4: RETURN 
-        if isConjFarmOn and isMasterToggleOn then
+        if isConjFarmOn and isSafe() then
             local returnTimer = tick()
             repeat
                 task.wait(0.5)
                 local curChar = player.Character
                 local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
-            until not isConjFarmOn or not isMasterToggleOn or not curHrp or curHrp.Position.Y < 10000 or (tick() - returnTimer > 30)
+            until not isConjFarmOn or not isSafe() or not curHrp or curHrp.Position.Y < 10000 or (tick() - returnTimer > 30)
             task.wait(1)
         end
     end
