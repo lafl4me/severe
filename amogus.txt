@@ -1351,12 +1351,25 @@ task.spawn(function()
                 local teleported = false
                 
                 while not teleported and isConjFarmOn and isMasterToggleOn do
-                    for i = 1, 5 do
-                        root.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
-                        task.wait(0.1)
-                    end
                     
-                    local startPos = root.Position
+                    -- [LAG FIX] VERIFIED TELEPORT TO YOGA MAT
+                    local tpTimeout1 = tick()
+                    while isConjFarmOn and isMasterToggleOn do
+                        local curRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                        if not curRoot then break end
+                        
+                        -- Keep pushing CFrame until server confirms we are within 10 studs of the mat
+                        if getDistance(curRoot.Position, yogaMat.Position) < 10 then break end
+                        
+                        curRoot.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
+                        task.wait(0.1)
+                        if tick() - tpTimeout1 > 10 then break end
+                    end
+                    task.wait(0.5) -- Wait for laggy clients/servers to fully sync before pressing E
+                    
+                    local curRootAfter1 = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                    if not curRootAfter1 then break end
+                    local startPos = curRootAfter1.Position
                     
                     if keypress and isConjFarmOn and isMasterToggleOn then
                         keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
@@ -1411,15 +1424,26 @@ task.spawn(function()
             if selfHrp and isConjFarmOn and isMasterToggleOn then
                 local inArena = false
                 while not inArena and isConjFarmOn and isMasterToggleOn do
-                    for i = 1, 5 do
-                        local targetCFrame = selfHrp.CFrame * CFrame.new(0, 0, -3)
-                        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                            player.Character.HumanoidRootPart.CFrame = CFrame.lookAt(targetCFrame.Position, selfHrp.Position)
-                        end
-                        task.wait(0.05)
-                    end
                     
-                    local startPos = player.Character.HumanoidRootPart.Position
+                    -- [LAG FIX] VERIFIED TELEPORT TO THE SELF
+                    local targetCFrame = selfHrp.CFrame * CFrame.new(0, 0, -3)
+                    local tpTimeout2 = tick()
+                    while isConjFarmOn and isMasterToggleOn do
+                        local curRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                        if not curRoot then break end
+                        
+                        -- Keep pushing CFrame until server confirms we are strictly within 10 studs
+                        if getDistance(curRoot.Position, targetCFrame.Position) < 10 then break end
+                        
+                        curRoot.CFrame = CFrame.lookAt(targetCFrame.Position, selfHrp.Position)
+                        task.wait(0.1)
+                        if tick() - tpTimeout2 > 10 then break end
+                    end
+                    task.wait(0.5) -- Wait for laggy clients/servers to fully sync before pressing E
+                    
+                    local curRootAfter2 = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                    if not curRootAfter2 then break end
+                    local startPos = curRootAfter2.Position
                     
                     if keypress and isConjFarmOn and isMasterToggleOn then
                         keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
