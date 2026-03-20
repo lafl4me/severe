@@ -247,6 +247,7 @@ if isHeadless then
                 for _, v in ipairs(lf:GetChildren()) do
                     if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
                         local name = v.Name:lower()
+                        -- V5 Specific logic: Targets any mob with a period (.) in front
                         if string.sub(name, 1, 1) == "." then
                             if not (string.find(name, "hostage") or string.find(name, "citizen") or string.find(name, "server")) then
                                 local mh = v:FindFirstChildOfClass("Humanoid")
@@ -1301,7 +1302,8 @@ local function findCombatTarget()
     local minDistance = 500 
 
     for _, v in ipairs(liveFolder:GetChildren()) do
-        if not v or v == char or v.Name == player.Name then continue end
+        -- ONLY exclude our actual character. Do NOT exclude by name anymore!
+        if not v or v == char then continue end
         
         if isWhitelisted(v) then continue end
 
@@ -1382,7 +1384,6 @@ task.spawn(function()
                         keypress(E_KEY) 
                     end
                     
-                    -- TIMEOUT INCREASED TO 25 SECONDS
                     while tick() - startTime < 25 and isConjFarmOn and isMasterToggleOn do
                         task.wait(0.1) 
                         local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -1431,7 +1432,6 @@ task.spawn(function()
                     if keypress and isConjFarmOn and isMasterToggleOn then keypress(E_KEY) end
                     task.wait(1.5) 
                     
-                    -- TIMEOUT INCREASED TO 25 SECONDS
                     while isConjFarmOn and isMasterToggleOn do
                         task.wait(0.05)
                         if keypress then
@@ -1466,7 +1466,7 @@ task.spawn(function()
         while not target and isConjFarmOn and isMasterToggleOn do
             target = findCombatTarget()
             task.wait(0.1)
-            if tick() - waitBoss > 15 then break end
+            if tick() - waitBoss > 30 then break end
         end
         
         local lastSummon = 0
@@ -1504,7 +1504,7 @@ task.spawn(function()
                 task.wait(0.5)
                 local curChar = player.Character
                 local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
-            until not isConjFarmOn or not isMasterToggleOn or not curHrp or curHrp.Position.Y < 10000 or (tick() - returnTimer > 15)
+            until not isConjFarmOn or not isMasterToggleOn or not curHrp or curHrp.Position.Y < 10000 or (tick() - returnTimer > 30)
             task.wait(1)
         end
     end
