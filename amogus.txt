@@ -82,7 +82,7 @@ if isHeadless then
     local currentRandomMode = "Above"
     local lastRandomChange = 0
     local lastSummonTime = 0
-    local isAttacking = false
+    local isAbilityFiring = false
     local lastKnownChar = nil
 
     local MIN_Y_LEVEL = -150
@@ -95,11 +95,13 @@ if isHeadless then
     end
 
     local function forceSummon()
-        if keypress then
-            keypress(SUMMON_KEY)
-            task.wait(0.1 + (MathRandom() * 0.05))
-            keyrelease(SUMMON_KEY)
-        end
+        task.spawn(function()
+            if keypress then
+                keypress(SUMMON_KEY)
+                task.wait(0.1 + (MathRandom() * 0.05))
+                keyrelease(SUMMON_KEY)
+            end
+        end)
         lastSummonTime = OsClock()
     end
 
@@ -243,22 +245,23 @@ if isHeadless then
                     elseif mode == "Middle" then root.CFrame = CFrame.lookAt(pos + (look * 2.5), pos)
                     else root.CFrame = CFrame.lookAt(pos + VectorCreate(0, OFFSET_DISTANCE, 0), pos) end
 
-                    if not isAttacking then
-                        isAttacking = true
+                    -- M1: always fires, no gate
+                    if mouse1press then
+                        mouse1press()
+                        task.wait(0.05)
+                        mouse1release()
+                    end
+
+                    -- Abilities: separate gate so M1 is never blocked
+                    if not isAbilityFiring and #ATTACK_KEYS > 0 then
+                        isAbilityFiring = true
                         task.spawn(function()
-                            if mouse1press then
-                                mouse1press()
-                                task.wait(0.01 + (MathRandom() * 0.02))
-                                mouse1release()
+                            for _, k in ATTACK_KEYS do
+                                if keypress then keypress(k) end
+                                task.wait(0.01 + (MathRandom() * 0.01))
+                                if keyrelease then keyrelease(k) end
                             end
-                            if keypress then
-                                for _, k in ATTACK_KEYS do
-                                    keypress(k)
-                                    task.wait(0.01 + (MathRandom() * 0.01))
-                                    keyrelease(k)
-                                end
-                            end
-                            isAttacking = false
+                            isAbilityFiring = false
                         end)
                     end
                 end
@@ -388,7 +391,6 @@ for _, str in Config.AttackKeyStrs do
 end
 
 local lastSummonTime = 0
-local isAttacking = false
 
 local function isWhitelisted(entity)
     if not entity then return false end
@@ -1042,12 +1044,15 @@ local function isStandOut(char)
     return (standAttr and standAttr ~= "" and standAttr ~= false)
 end
 
+-- FIX: wrapped in task.spawn so it never yields the calling loop thread
 local function forceSummon()
-    if keypress then
-        keypress(SUMMON_KEY)
-        task.wait(0.1 + (MathRandom() * 0.05))
-        keyrelease(SUMMON_KEY)
-    end
+    task.spawn(function()
+        if keypress then
+            keypress(SUMMON_KEY)
+            task.wait(0.1 + (MathRandom() * 0.05))
+            keyrelease(SUMMON_KEY)
+        end
+    end)
     lastSummonTime = OsClock()
 end
 
@@ -1134,21 +1139,21 @@ task.spawn(function()
         if closestTarget then
             root.CFrame = calculateTargetCFrame(closestTarget)
 
-            -- M1: always spam, no gate
+            -- M1: always fires inline every tick, no gate
             if mouse1press then
                 mouse1press()
                 task.wait(0.05)
                 mouse1release()
             end
 
-            -- Abilities: gated separately so M1 is never blocked
-            if not isAbilityFiring1 and keypress then
+            -- Abilities: own separate gate, never blocks M1
+            if not isAbilityFiring1 and #ATTACK_KEYS > 0 then
                 isAbilityFiring1 = true
                 task.spawn(function()
                     for _, k in ATTACK_KEYS do
-                        keypress(k)
+                        if keypress then keypress(k) end
                         task.wait(0.01 + MathRandom() * 0.01)
-                        keyrelease(k)
+                        if keyrelease then keyrelease(k) end
                     end
                     isAbilityFiring1 = false
                 end)
@@ -1222,184 +1227,24 @@ task.spawn(function()
         if closestTarget then
             root.CFrame = calculateTargetCFrame(closestTarget)
 
-            -- M1: always spam, no gate
+            -- M1: always fires inline every tick, no gate
             if mouse1press then
                 mouse1press()
                 task.wait(0.05)
                 mouse1release()
             end
 
-            -- Abilities: gated separately so M1 is never blocked
-            if not isAbilityFiring2 and keypress then
+            -- Abilities: own separate gate, never blocks M1
+            if not isAbilityFiring2 and #ATTACK_KEYS > 0 then
                 isAbilityFiring2 = true
                 task.spawn(function()
                     for _, k in ATTACK_KEYS do
-                        keypress(k)
+                        if keypress then keypress(k) end
                         task.wait(0.01 + MathRandom() * 0.01)
-                        keyrelease(k)
+                        if keyrelease then keyrelease(k) end
                     end
                     isAbilityFiring2 = false
                 end)
-            end
-        end
-    end
-end)
-
--- ==========================================
--- MODULE 2: SPECIFIC TARGET FARM (Mob OR Player)
--- ==========================================
-local isAttacking2 = false  -- CHANGED: was shared `isAttacking`
-
-task.spawn(function()
-    while true do
-        task.wait(0.05)
-        if not isMobFarmOn then continue end
-
-        local hasMobTarget = (selectedMob and selectedMob ~= "None" and selectedMob ~= "")
-        local hasPlayerTarget = (selectedPlayerTarget and selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "")
-
-        if not hasMobTarget and not hasPlayerTarget then continue end
-
-        local char = player.Character
-        if not char then continue end
-
-        local root = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not root or not hum or hum.Health <= 0 then continue end
-
-        if not isStandOut(char) and (OsClock() - lastSummonTime) > 3 then forceSummon() end
-
-        local activeTargetKeyword = StringMatch(selectedMob, "^(.-) %(") or selectedMob
-
-        local liveFolder = Workspace:FindFirstChild("Live")
-        if liveFolder then
-            local closestTarget = nil
-            local minDist = MathHuge
-            local myPos = root.Position
-
-            for _, v in liveFolder:GetChildren() do
-                if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char then
-
-                    if isWhitelisted(v) then continue end
-
-                    local isTarget = false
-
-                    if hasMobTarget and StringFind(v.Name, activeTargetKeyword, 1, true) then
-                        isTarget = true
-                    end
-
-                    if hasPlayerTarget and v.Name == selectedPlayerTarget then
-                        isTarget = true
-                    end
-
-                    if isTarget then
-                        local mobHum = v:FindFirstChildOfClass("Humanoid")
-                        if mobHum and mobHum.Health > 0 then
-                            local hrp = v.HumanoidRootPart
-                            local tPos = hrp.Position
-                            if tPos.Y > MIN_Y_LEVEL then
-                                local dist = VectorMagnitude(myPos - tPos)
-                                if dist < minDist then
-                                    minDist = dist
-                                    closestTarget = hrp
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            if closestTarget then
-                root.CFrame = calculateTargetCFrame(closestTarget)
-                if not isAttacking2 then  -- CHANGED
-                    isAttacking2 = true   -- CHANGED
-                    task.spawn(function()
-                        if mouse1press then mouse1press(); task.wait(0.05); mouse1release() end  -- CHANGED: 0.05 was 0.01+rand
-                        if keypress then
-                            for _, k in ATTACK_KEYS do keypress(k); task.wait(0.01 + MathRandom()*0.01); keyrelease(k) end
-                        end
-                        isAttacking2 = false  -- CHANGED
-                    end)
-                end
-            end
-        end
-    end
-end)
-
--- ==========================================
--- MODULE 2: SPECIFIC TARGET FARM (Mob OR Player)
--- ==========================================
-task.spawn(function()
-    while true do
-        task.wait(0.05)
-        if not isMobFarmOn then continue end
-
-        local hasMobTarget = (selectedMob and selectedMob ~= "None" and selectedMob ~= "")
-        local hasPlayerTarget = (selectedPlayerTarget and selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "")
-
-        if not hasMobTarget and not hasPlayerTarget then continue end
-
-        local char = player.Character
-        if not char then continue end
-
-        local root = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not root or not hum or hum.Health <= 0 then continue end
-
-        if not isStandOut(char) and (OsClock() - lastSummonTime) > 3 then forceSummon() end
-
-        local activeTargetKeyword = StringMatch(selectedMob, "^(.-) %(") or selectedMob
-
-        local liveFolder = Workspace:FindFirstChild("Live")
-        if liveFolder then
-            local closestTarget = nil
-            local minDist = MathHuge
-            local myPos = root.Position
-
-            for _, v in liveFolder:GetChildren() do
-                if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char then
-
-                    if isWhitelisted(v) then continue end
-
-                    local isTarget = false
-
-                    if hasMobTarget and StringFind(v.Name, activeTargetKeyword, 1, true) then
-                        isTarget = true
-                    end
-
-                    if hasPlayerTarget and v.Name == selectedPlayerTarget then
-                        isTarget = true
-                    end
-
-                    if isTarget then
-                        local mobHum = v:FindFirstChildOfClass("Humanoid")
-                        if mobHum and mobHum.Health > 0 then
-                            local hrp = v.HumanoidRootPart
-                            local tPos = hrp.Position
-                            if tPos.Y > MIN_Y_LEVEL then
-                                local dist = VectorMagnitude(myPos - tPos)
-                                if dist < minDist then
-                                    minDist = dist
-                                    closestTarget = hrp
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            if closestTarget then
-                root.CFrame = calculateTargetCFrame(closestTarget)
-                if not isAttacking then
-                    isAttacking = true
-                    task.spawn(function()
-                        if mouse1press then mouse1press(); task.wait(0.01 + MathRandom()*0.02); mouse1release() end
-                        if keypress then
-                            for _, k in ATTACK_KEYS do keypress(k); task.wait(0.01 + MathRandom()*0.01); keyrelease(k) end
-                        end
-                        isAttacking = false
-                    end)
-                end
             end
         end
     end
@@ -1589,14 +1434,12 @@ task.spawn(function()
         while not target and isConjFarmOn do
             target = findCombatTarget()
             task.wait(0.1)
-            -- Failsafe: Prevent freezing if the boss fails to spawn
             if OsClock() - waitBoss > 15 then break end
         end
 
         local lastSummon = 0
         local attacking = false
 
-        -- Fortified condition to ensure the target actually exists in Workspace
         while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn do
             task.wait(0.05)
             local c = player.Character
@@ -1605,18 +1448,29 @@ task.spawn(function()
             if not r or not charHum or charHum.Health <= 0 then break end
 
             if not isStandOut(c) and (OsClock() - lastSummon) > 3 then
-                if keypress then keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY) end
+                task.spawn(function()
+                    if keypress then keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY) end
+                end)
                 lastSummon = OsClock()
             end
 
             r.CFrame = calculateTargetCFrame(target.hrp)
 
-            if not attacking then
+            -- M1: always fires inline every tick, no gate
+            if mouse1press then
+                mouse1press()
+                task.wait(0.05)
+                mouse1release()
+            end
+
+            -- Abilities: own separate gate, never blocks M1
+            if not attacking and #ATTACK_KEYS > 0 then
                 attacking = true
                 task.spawn(function()
-                    if mouse1press then mouse1press(); task.wait(0.01); mouse1release() end
-                    if keypress then
-                        for _, k in ATTACK_KEYS do keypress(k); task.wait(0.01); keyrelease(k) end
+                    for _, k in ATTACK_KEYS do
+                        if keypress then keypress(k) end
+                        task.wait(0.01)
+                        if keyrelease then keyrelease(k) end
                     end
                     attacking = false
                 end)
@@ -1630,7 +1484,6 @@ task.spawn(function()
                 task.wait(0.5)
                 local curChar = player.Character
                 local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
-                -- We know we have returned to the gym when our Y position falls out of the sky
             until not isConjFarmOn or not curHrp or curHrp.Position.Y < 10000 or (OsClock() - returnTimer > 15)
             task.wait(1)
         end
