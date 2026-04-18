@@ -1056,7 +1056,6 @@ local function calculateTargetCFrame(targetRoot)
     local look = targetRoot.CFrame.LookVector
     local mode = hitPosition
 
-    -- Random Mode Logic
     if mode == "Random" then
         if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
             local modes = {"Above", "Below", "Behind", "Middle"}
@@ -1064,8 +1063,6 @@ local function calculateTargetCFrame(targetRoot)
             lastRandomChange = OsClock()
         end
         mode = currentRandomMode
-
-    -- Up & Down Mode Logic
     elseif mode == "Up & down" then
         if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
             if currentRandomMode == "Above" then
@@ -1090,6 +1087,8 @@ end
 -- ==========================================
 -- MODULE 1: RANDOMIZED KILLING
 -- ==========================================
+local isAttacking1 = false  -- CHANGED: was shared `isAttacking`
+
 task.spawn(function()
     while true do
         task.wait(0.05)
@@ -1135,14 +1134,95 @@ task.spawn(function()
 
             if closestTarget then
                 root.CFrame = calculateTargetCFrame(closestTarget)
-                if not isAttacking then
-                    isAttacking = true
+                if not isAttacking1 then  -- CHANGED
+                    isAttacking1 = true   -- CHANGED
                     task.spawn(function()
-                        if mouse1press then mouse1press(); task.wait(0.01 + MathRandom()*0.02); mouse1release() end
+                        if mouse1press then mouse1press(); task.wait(0.05); mouse1release() end  -- CHANGED: 0.05 was 0.01+rand
                         if keypress then
                             for _, k in ATTACK_KEYS do keypress(k); task.wait(0.01 + MathRandom()*0.01); keyrelease(k) end
                         end
-                        isAttacking = false
+                        isAttacking1 = false  -- CHANGED
+                    end)
+                end
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- MODULE 2: SPECIFIC TARGET FARM (Mob OR Player)
+-- ==========================================
+local isAttacking2 = false  -- CHANGED: was shared `isAttacking`
+
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        if not isMobFarmOn then continue end
+
+        local hasMobTarget = (selectedMob and selectedMob ~= "None" and selectedMob ~= "")
+        local hasPlayerTarget = (selectedPlayerTarget and selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "")
+
+        if not hasMobTarget and not hasPlayerTarget then continue end
+
+        local char = player.Character
+        if not char then continue end
+
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not root or not hum or hum.Health <= 0 then continue end
+
+        if not isStandOut(char) and (OsClock() - lastSummonTime) > 3 then forceSummon() end
+
+        local activeTargetKeyword = StringMatch(selectedMob, "^(.-) %(") or selectedMob
+
+        local liveFolder = Workspace:FindFirstChild("Live")
+        if liveFolder then
+            local closestTarget = nil
+            local minDist = MathHuge
+            local myPos = root.Position
+
+            for _, v in liveFolder:GetChildren() do
+                if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char then
+
+                    if isWhitelisted(v) then continue end
+
+                    local isTarget = false
+
+                    if hasMobTarget and StringFind(v.Name, activeTargetKeyword, 1, true) then
+                        isTarget = true
+                    end
+
+                    if hasPlayerTarget and v.Name == selectedPlayerTarget then
+                        isTarget = true
+                    end
+
+                    if isTarget then
+                        local mobHum = v:FindFirstChildOfClass("Humanoid")
+                        if mobHum and mobHum.Health > 0 then
+                            local hrp = v.HumanoidRootPart
+                            local tPos = hrp.Position
+                            if tPos.Y > MIN_Y_LEVEL then
+                                local dist = VectorMagnitude(myPos - tPos)
+                                if dist < minDist then
+                                    minDist = dist
+                                    closestTarget = hrp
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            if closestTarget then
+                root.CFrame = calculateTargetCFrame(closestTarget)
+                if not isAttacking2 then  -- CHANGED
+                    isAttacking2 = true   -- CHANGED
+                    task.spawn(function()
+                        if mouse1press then mouse1press(); task.wait(0.05); mouse1release() end  -- CHANGED: 0.05 was 0.01+rand
+                        if keypress then
+                            for _, k in ATTACK_KEYS do keypress(k); task.wait(0.01 + MathRandom()*0.01); keyrelease(k) end
+                        end
+                        isAttacking2 = false  -- CHANGED
                     end)
                 end
             end
