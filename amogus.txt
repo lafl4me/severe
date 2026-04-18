@@ -108,6 +108,33 @@ local function isSafe(): boolean
 end
 
 -- ==========================================
+-- INIT CONFIG FROM _G.Settings
+-- ==========================================
+local rawSummonStr  = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q"
+local rawAttackStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E","R","Z","X","C","V"}
+
+local initAttackKeys: {string} = {}
+for _, k in ipairs(rawAttackStrs) do
+    table.insert(initAttackKeys, cleanKey(k))
+end
+
+local Config: {[string]: any} = {
+    HitPosition       = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.position) or "Above",
+    OffsetDistance    = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.distance) or 10,
+    RandomSwitchSpeed = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.speed)    or 2,
+    SummonKeyStr      = cleanKey(rawSummonStr),
+    AttackKeyStrs     = initAttackKeys,
+    WhitelistedNames  = {} :: {string},
+    TargetPlayer      = "None",
+}
+
+SUMMON_KEY  = KEY_MAP[Config.SummonKeyStr] or 0x51
+ATTACK_KEYS = {}
+for _, s in ipairs(Config.AttackKeyStrs :: {string}) do
+    if KEY_MAP[s] then table.insert(ATTACK_KEYS, KEY_MAP[s]) end
+end
+
+-- ==========================================
 -- RUNTIME STATE
 -- ==========================================
 local isLobbyFarmOn = false
@@ -118,23 +145,14 @@ local isAttackingLobby = false
 local isAttackingMob   = false
 local isAttackingConj  = false
 
-local hitPosition         = "Above"
-local OFFSET_DISTANCE     = 10
-local RANDOM_SWITCH_SPEED = 2
+local hitPosition         = Config.HitPosition :: string
+local OFFSET_DISTANCE     = Config.OffsetDistance :: number
+local RANDOM_SWITCH_SPEED = Config.RandomSwitchSpeed :: number
 
 local selectedMob          = "None"
-local selectedPlayerTarget = "None"
-local lastSummonTime       = 0
+local selectedPlayerTarget = Config.TargetPlayer :: string
 
-local summonKeyStr    = "Q"
-local attackKeyStrs: {string} = {"E","R","Z","X","C","V"}
-
--- Apply defaults
-SUMMON_KEY  = KEY_MAP[summonKeyStr] or 0x51
-ATTACK_KEYS = {}
-for _, s in ipairs(attackKeyStrs) do
-    if KEY_MAP[s] then table.insert(ATTACK_KEYS, KEY_MAP[s]) end
-end
+local lastSummonTime = 0
 
 -- ==========================================
 -- HEADLESS AUTOFARM (V5)
@@ -198,7 +216,7 @@ if isHeadless then
         while true do
             task.wait(0.5)
             if not isMasterToggleOn then emptyTimer = 0; continue end
-            local c = player.Character
+            local c      = player.Character
             local inGame = (
                 c ~= nil and
                 c:FindFirstChild("HumanoidRootPart") ~= nil and
@@ -345,9 +363,6 @@ end
 -- UI PATH
 -- ==============================================================================
 
--- ==========================================
--- DATA FETCHERS
--- ==========================================
 local function getGroupedMobs(): {string}
     local counts: {[string]: number} = {}
     local bases:  {string} = {}
@@ -396,15 +411,10 @@ local function getPlayerNames(): {string}
     return list
 end
 
--- ==========================================
--- WHITELIST CHECK
--- ==========================================
-local whitelistedNames: {string} = {}
-
 local function isWhitelisted(entity: Instance): boolean
     if not entity then return false end
     local entLow = string.lower(entity.Name)
-    for _, wName in ipairs(whitelistedNames) do
+    for _, wName in ipairs(Config.WhitelistedNames :: {string}) do
         if wName == "" then continue end
         local wLow = string.lower(wName)
         if entLow == wLow then return true end
@@ -421,17 +431,11 @@ local function isWhitelisted(entity: Instance): boolean
     return false
 end
 
--- ==========================================
--- STAND CHECK
--- ==========================================
 local function isStandOut(char: Model): boolean
     local a = char:GetAttribute("SummonedStand")
     return a ~= nil and a ~= "" and a ~= false
 end
 
--- ==========================================
--- SUMMON HELPER
--- ==========================================
 local function forceSummon()
     if not isSafe() then return end
     keypress(SUMMON_KEY)
@@ -440,9 +444,6 @@ local function forceSummon()
     lastSummonTime = tick()
 end
 
--- ==========================================
--- POSITION CALCULATOR
--- ==========================================
 local function calculateCFrame(
     targetRoot: BasePart,
     randomModeRef: {value: string},
@@ -510,7 +511,6 @@ local tpTab     = win:addTab("Teleports")
 -- TAB: RANDOMIZED
 -- ==========================================
 lobbyTab:addText({ text = "  [ RANDOMIZED KILLING ]  " })
-
 local lobbyCheck = lobbyTab:addCheckbox({ text = "Enable Autofarm", default = false })
 lobbyCheck.OnChanged:Connect(function(v)
     isLobbyFarmOn = v
@@ -523,7 +523,7 @@ lobbyTab:addText({ text = "  [ PLAYER WHITELIST ]  " })
 local function getWhitelistItems(): {string}
     local items: {string} = {}
     local seen: {[string]: boolean} = {}
-    for _, name in ipairs(whitelistedNames) do
+    for _, name in ipairs(Config.WhitelistedNames :: {string}) do
         if name ~= "" and not seen[name] then table.insert(items, name); seen[name] = true end
     end
     for _, p in ipairs(Players:GetChildren()) do
@@ -534,13 +534,20 @@ local function getWhitelistItems(): {string}
     return items
 end
 
-local wlItems: {string} = getWhitelistItems()
-local whitelistDrop = lobbyTab:addDropdown({ text = "None", items = wlItems, defaultIndices = {} })
+local wlItems: {string}  = getWhitelistItems()
+local wlIndices: {number} = {}
+for i, val in ipairs(wlItems) do
+    for _, w in ipairs(Config.WhitelistedNames :: {string}) do
+        if val == w then table.insert(wlIndices, i) end
+    end
+end
+
+local whitelistDrop = lobbyTab:addDropdown({ text = "None", items = wlItems, defaultIndices = wlIndices })
 whitelistDrop.OnChanged:Connect(function(val1, val2)
-    whitelistedNames = {}
+    Config.WhitelistedNames = {}
     local list = type(val2) == "table" and val2 or (type(val1) == "table" and val1 or {val1})
     for _, v in pairs(list) do
-        if type(v) == "string" and v ~= "" then table.insert(whitelistedNames, v) end
+        if type(v) == "string" and v ~= "" then table.insert(Config.WhitelistedNames :: {string}, v) end
     end
 end)
 
@@ -548,9 +555,9 @@ local refreshWlBtn = lobbyTab:addButton({ text = "Refresh Players" })
 refreshWlBtn.OnClick:Connect(function()
     local newItems = getWhitelistItems()
     pcall(function()
-        if      whitelistDrop.Refresh   then whitelistDrop:Refresh(newItems)
-        elseif  whitelistDrop.update    then whitelistDrop:update(newItems)
-        elseif  whitelistDrop.setItems  then whitelistDrop:setItems(newItems) end
+        if      whitelistDrop.Refresh  then whitelistDrop:Refresh(newItems)
+        elseif  whitelistDrop.update   then whitelistDrop:update(newItems)
+        elseif  whitelistDrop.setItems then whitelistDrop:setItems(newItems) end
     end)
     notify("Players list refreshed!")
 end)
@@ -561,7 +568,7 @@ end)
 mobTab:addText({ text = "  [ ENTITY SELECTION ]  " })
 
 local initialMobs = getGroupedMobs()
-local mobDropdown = mobTab:addDropdown({ text = "Target NPC / Mob", items = initialMobs, defaultIndex = 1 })
+local mobDropdown = mobTab:addDropdown({ text = "Target NPC / Mob", items = initialMobs, defaultIndex = getIndex(initialMobs, selectedMob) })
 mobDropdown.OnChanged:Connect(function(val)
     if type(val) == "string" then selectedMob = val end
 end)
@@ -570,9 +577,9 @@ local refreshMobBtn = mobTab:addButton({ text = "Refresh & Group Mobs" })
 refreshMobBtn.OnClick:Connect(function()
     local refMobs = getGroupedMobs()
     pcall(function()
-        if      mobDropdown.Refresh   then mobDropdown:Refresh(refMobs)
-        elseif  mobDropdown.update    then mobDropdown:update(refMobs)
-        elseif  mobDropdown.setItems  then mobDropdown:setItems(refMobs) end
+        if      mobDropdown.Refresh  then mobDropdown:Refresh(refMobs)
+        elseif  mobDropdown.update   then mobDropdown:update(refMobs)
+        elseif  mobDropdown.setItems then mobDropdown:setItems(refMobs) end
     end)
     notify("Mobs refreshed!")
 end)
@@ -581,10 +588,11 @@ mobTab:addText({ text = " " })
 mobTab:addText({ text = "  [ PLAYER SELECTION ]  " })
 
 local initialPlayers = getPlayerNames()
-local playerDropdown = mobTab:addDropdown({ text = "Target Player", items = initialPlayers, defaultIndex = 1 })
+local playerDropdown = mobTab:addDropdown({ text = "Target Player", items = initialPlayers, defaultIndex = getIndex(initialPlayers, selectedPlayerTarget) })
 playerDropdown.OnChanged:Connect(function(val)
     if type(val) == "string" then
         selectedPlayerTarget = val
+        Config.TargetPlayer  = val
     end
 end)
 
@@ -592,9 +600,9 @@ local refreshPlrBtn = mobTab:addButton({ text = "Refresh Players" })
 refreshPlrBtn.OnClick:Connect(function()
     local refPlrs = getPlayerNames()
     pcall(function()
-        if      playerDropdown.Refresh   then playerDropdown:Refresh(refPlrs)
-        elseif  playerDropdown.update    then playerDropdown:update(refPlrs)
-        elseif  playerDropdown.setItems  then playerDropdown:setItems(refPlrs) end
+        if      playerDropdown.Refresh  then playerDropdown:Refresh(refPlrs)
+        elseif  playerDropdown.update   then playerDropdown:update(refPlrs)
+        elseif  playerDropdown.setItems then playerDropdown:setItems(refPlrs) end
     end)
     notify("Players refreshed!")
 end)
@@ -614,45 +622,48 @@ end)
 combatTab:addText({ text = "  [ AUTOFARM POSITION ]  " })
 
 local posOptions = {"Above","Below","Behind","Middle","Random","Up & down"}
-local posDrop = combatTab:addDropdown({ text = "Hit Position", items = posOptions, defaultIndex = 1 })
+local posDrop = combatTab:addDropdown({ text = "Hit Position", items = posOptions, defaultIndex = getIndex(posOptions, hitPosition) })
 posDrop.OnChanged:Connect(function(val)
-    hitPosition = val
+    hitPosition        = val
+    Config.HitPosition = val
 end)
 
-local distSlider = combatTab:addSlider({ text = "Offset Distance", min = 5, max = 20, mode = "number", default = 10 })
+local distSlider = combatTab:addSlider({ text = "Offset Distance", min = 5, max = 20, mode = "number", default = OFFSET_DISTANCE })
 distSlider.OnChanged:Connect(function(val)
-    OFFSET_DISTANCE = val
+    OFFSET_DISTANCE       = val
+    Config.OffsetDistance = val
 end)
 
-local randSpeedSlider = combatTab:addSlider({ text = "Switch Delay", min = 1, max = 10, mode = "number", default = 2 })
+local randSpeedSlider = combatTab:addSlider({ text = "Switch Delay", min = 1, max = 10, mode = "number", default = RANDOM_SWITCH_SPEED })
 randSpeedSlider.OnChanged:Connect(function(val)
-    RANDOM_SWITCH_SPEED = val
+    RANDOM_SWITCH_SPEED      = val
+    Config.RandomSwitchSpeed = val
 end)
 
 combatTab:addText({ text = " " })
 combatTab:addText({ text = "  [ CUSTOM KEYBINDS ]  " })
 
-local summonKeyDrop = combatTab:addDropdown({ text = "Stand Keybind", items = ALL_KEYS, defaultIndex = getIndex(ALL_KEYS, "Q") })
+local summonKeyDrop = combatTab:addDropdown({ text = "Stand Keybind", items = ALL_KEYS, defaultIndex = getIndex(ALL_KEYS, Config.SummonKeyStr :: string) })
 summonKeyDrop.OnChanged:Connect(function(val)
     if type(val) == "string" and KEY_MAP[val] then
-        SUMMON_KEY    = KEY_MAP[val]
-        summonKeyStr  = val
+        SUMMON_KEY          = KEY_MAP[val]
+        Config.SummonKeyStr = val
     end
 end)
 
-local defaultAtkIndices: {number} = {}
-for _, k in ipairs({"E","R","Z","X","C","V"}) do
-    table.insert(defaultAtkIndices, getIndex(ALL_KEYS, k))
+local loadedAtkIndices: {number} = {}
+for _, savedKey in ipairs(Config.AttackKeyStrs :: {string}) do
+    table.insert(loadedAtkIndices, getIndex(ALL_KEYS, savedKey))
 end
 
-local attackKeysDrop = combatTab:addDropdown({ text = "Combat Keybinds", items = ALL_KEYS, defaultIndices = defaultAtkIndices })
+local attackKeysDrop = combatTab:addDropdown({ text = "Combat Keybinds", items = ALL_KEYS, defaultIndices = loadedAtkIndices })
 attackKeysDrop.OnChanged:Connect(function(_, values)
-    ATTACK_KEYS     = {}
-    attackKeyStrs   = {}
+    ATTACK_KEYS          = {}
+    Config.AttackKeyStrs = {}
     for _, letter in ipairs(values or {}) do
         if KEY_MAP[letter] then
             table.insert(ATTACK_KEYS, KEY_MAP[letter])
-            table.insert(attackKeyStrs, letter)
+            table.insert(Config.AttackKeyStrs :: {string}, letter)
         end
     end
 end)
@@ -714,9 +725,9 @@ local refreshTpPlrBtn = tpTab:addButton({ text = "Refresh Players" })
 refreshTpPlrBtn.OnClick:Connect(function()
     local refPlrs = getPlayerNames()
     pcall(function()
-        if      tpPlayerDrop.Refresh   then tpPlayerDrop:Refresh(refPlrs)
-        elseif  tpPlayerDrop.update    then tpPlayerDrop:update(refPlrs)
-        elseif  tpPlayerDrop.setItems  then tpPlayerDrop:setItems(refPlrs) end
+        if      tpPlayerDrop.Refresh  then tpPlayerDrop:Refresh(refPlrs)
+        elseif  tpPlayerDrop.update   then tpPlayerDrop:update(refPlrs)
+        elseif  tpPlayerDrop.setItems then tpPlayerDrop:setItems(refPlrs) end
     end)
     notify("Player list refreshed!")
 end)
@@ -730,9 +741,7 @@ tpToPlayerBtn.OnClick:Connect(function()
         task.spawn(function()
             for _ = 1, 5 do
                 if not isSafe() then break end
-                root.CFrame = CFrame.new(
-                    (targetPlr.Character :: Model).HumanoidRootPart.Position + Vector3.new(0, 3, 0)
-                )
+                root.CFrame = CFrame.new((targetPlr.Character :: Model).HumanoidRootPart.Position + Vector3.new(0, 3, 0))
                 task.wait(0.05)
             end
             notify("Teleported to " .. targetPlr.Name .. "!")
@@ -802,9 +811,7 @@ task.spawn(function()
             task.spawn(function()
                 for _, k in ipairs(ATTACK_KEYS) do
                     if not isSafe() or not isLobbyFarmOn then break end
-                    keypress(k)
-                    task.wait(0.01 + math.random() * 0.01)
-                    keyrelease(k)
+                    keypress(k); task.wait(0.01 + math.random() * 0.01); keyrelease(k)
                 end
                 isAttackingLobby = false
             end)
@@ -860,7 +867,7 @@ task.spawn(function()
             if isWhitelisted(v) then continue end
 
             local isTarget =
-                (hasMob and string.find(v.Name, keyword, 1, true)) or
+                (hasMob and string.find(v.Name, keyword, 1, true) ~= nil) or
                 (hasPlr and v.Name == selectedPlayerTarget)
 
             if not isTarget then continue end
@@ -882,9 +889,7 @@ task.spawn(function()
             task.spawn(function()
                 for _, k in ipairs(ATTACK_KEYS) do
                     if not isSafe() or not isMobFarmOn then break end
-                    keypress(k)
-                    task.wait(0.01 + math.random() * 0.01)
-                    keyrelease(k)
+                    keypress(k); task.wait(0.01 + math.random() * 0.01); keyrelease(k)
                 end
                 isAttackingMob = false
             end)
@@ -896,51 +901,56 @@ end)
 -- MODULE 3: CONJURATION LOOP
 -- ==========================================
 local function findConjTarget(): {hrp: BasePart, hum: Humanoid}?
-    local lf   = workspace:FindFirstChild("Live")
-    local char = player.Character
-    if not lf or not char then return nil end
-    local root = char:FindFirstChild("HumanoidRootPart") :: BasePart?
-    if not root or root.Position.Y < CONJ_Y_MIN then return nil end
+    local ok, result = pcall(function(): {hrp: BasePart, hum: Humanoid}?
+        local lf   = workspace:FindFirstChild("Live")
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        if not lf or not root then return nil end
+        if root.Position.Y < CONJ_Y_MIN then return nil end
 
-    local closest: {hrp: BasePart, hum: Humanoid}? = nil
-    local minDist = 500
-    local myPos   = root.Position
+        local closest: {hrp: BasePart, hum: Humanoid}? = nil
+        local minDist = 500
+        local myPos   = root.Position
 
-    for _, v in ipairs(lf:GetChildren()) do
-        if v == char then continue end
-        if isWhitelisted(v) then continue end
-        local isPlr = false
-        for _, p in ipairs(Players:GetChildren()) do
-            if p:IsA("Player") and p.Character == v then isPlr = true; break end
-        end
-        if isPlr then continue end
-        local mh  = v:FindFirstChildOfClass("Humanoid") :: Humanoid?
-        local hrp = (v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")) :: BasePart?
-        if hrp and mh and mh.Health > 0 and hrp.Position.Y > CONJ_Y_MIN then
-            local d = getDistance(myPos, hrp.Position)
-            if d < minDist then
-                minDist  = d
-                closest  = { hrp = hrp, hum = mh }
+        for _, v in ipairs(lf:GetChildren()) do
+            if v == char then continue end
+            if isWhitelisted(v) then continue end
+            local isPlr = false
+            for _, p in ipairs(Players:GetChildren()) do
+                if p:IsA("Player") and p.Character == v then isPlr = true; break end
+            end
+            if isPlr then continue end
+            local mh  = v:FindFirstChildOfClass("Humanoid") :: Humanoid?
+            local hrp = (v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")) :: BasePart?
+            if hrp and mh and mh.Health > 0 and hrp.Position.Y > CONJ_Y_MIN then
+                local d = getDistance(myPos, hrp.Position)
+                if d < minDist then
+                    minDist  = d
+                    closest  = { hrp = hrp, hum = mh }
+                end
             end
         end
-    end
-    return closest
+        return closest
+    end)
+    if not ok then return nil end
+    return result
 end
 
 task.spawn(function()
     local rMode   = { value = "Above" }
     local rChange = { value = 0 }
 
-    -- M1 hold only during active combat phase
+    -- M1 hold thread: only active while a conj target exists
     task.spawn(function()
         local holding = false
         while true do
             task.wait(0.01)
-            local inCombat = isConjFarmOn and isSafe() and (findConjTarget() ~= nil)
-            if inCombat and not holding then
+            local hasTarget  = findConjTarget() ~= nil
+            local shouldHold = isConjFarmOn and isSafe() and hasTarget
+            if shouldHold and not holding then
                 if mouse1press then mouse1press() end
                 holding = true
-            elseif not inCombat and holding then
+            elseif not shouldHold and holding then
                 if mouse1release then mouse1release() end
                 holding = false
             end
@@ -948,158 +958,154 @@ task.spawn(function()
     end)
 
     while true do
-        task.wait(0.5)
+        -- Slow outer tick — conjuration is phase-based, not tight-loop
+        task.wait(1)
+        if not isConjFarmOn or not isSafe() then continue end
 
-        if not isConjFarmOn or not isSafe() then
-            task.wait(0.5)
-            continue
-        end
-
-        -- PHASE 1: YOGA MAT (only if no combat target found)
+        -- ----------------------------------------
+        -- PHASE 1: NAVIGATE TO YOGA MAT
+        -- ----------------------------------------
         if not findConjTarget() then
-            local ok1, mapObj  = pcall(function() return workspace:FindFirstChild("Map") end)
-            local medit        = ok1 and mapObj and mapObj:FindFirstChild("Meditation")
-            local yogaMat      = medit and medit:FindFirstChild("Yoga Mat") :: BasePart?
+            local yogaMat: BasePart? = nil
+            pcall(function()
+                local mapObj = workspace:FindFirstChild("Map")
+                local medit  = mapObj and mapObj:FindFirstChild("Meditation")
+                yogaMat      = medit and medit:FindFirstChild("Yoga Mat") :: BasePart?
+            end)
 
             if yogaMat and isConjFarmOn and isSafe() then
-                local teleported = false
-                local loopGuard  = 0
+                -- Teleport to mat
+                local tpStart = tick()
+                while isConjFarmOn and isSafe() do
+                    local r = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                    if not r or not yogaMat.Parent then break end
+                    if getDistance(r.Position, yogaMat.Position) < 10 then break end
+                    r.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
+                    task.wait(0.15)
+                    if tick() - tpStart > 10 then break end
+                end
 
-                while not teleported and isConjFarmOn and isSafe() do
-                    loopGuard += 1
-                    if loopGuard > 20 then break end -- hard cap: avoid infinite loop
-                    if not yogaMat.Parent then break end
+                if not isConjFarmOn or not isSafe() then continue end
+                task.wait(0.5)
 
-                    -- Teleport to mat
-                    local tpStart = tick()
-                    while isConjFarmOn and isSafe() do
-                        local r = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-                        if not r then break end
-                        if getDistance(r.Position, yogaMat.Position) < 10 then break end
-                        r.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
-                        task.wait(0.1)
-                        if tick() - tpStart > 10 then break end
-                    end
-
-                    if not isSafe() then break end
-                    task.wait(0.5)
-
-                    local charNow = player.Character
-                    if not charNow then break end
-                    local startPos = (charNow:FindFirstChild("HumanoidRootPart") :: BasePart).Position
-
-                    -- Nudge to register proximity
+                -- Nudge to register standing on mat
+                pcall(function()
                     keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                     task.wait(0.05)
                     keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
-                    task.wait(0.2)
+                end)
+                task.wait(0.2)
 
-                    -- Camera lock
-                    local camActive = true
-                    task.spawn(function()
-                        while camActive and isConjFarmOn and isSafe() do
-                            task.wait(0.05)
-                            local ok2, cam = pcall(function() return workspace.CurrentCamera end)
+                -- Camera lock toward mat
+                local camActive = true
+                task.spawn(function()
+                    while camActive and isConjFarmOn and isSafe() do
+                        task.wait(0.05)
+                        pcall(function()
+                            local cam  = workspace.CurrentCamera
                             local head = player.Character and player.Character:FindFirstChild("Head") :: BasePart?
-                            if ok2 and cam and head and yogaMat and yogaMat.Parent then
+                            if cam and head and yogaMat and yogaMat.Parent then
                                 cam.CFrame = CFrame.lookAt(head.Position + Vector3.new(0, 2, 5), yogaMat.Position)
                             end
-                        end
-                    end)
-
-                    -- Interact
-                    local interactStart = tick()
-                    keypress(E_KEY); task.wait(0.1); keyrelease(E_KEY)
-                    task.wait(0.1)
-                    keypress(E_KEY)
-
-                    while tick() - interactStart < 25 and isConjFarmOn and isSafe() do
-                        task.wait(0.1)
-                        local curChar = player.Character
-                        local curHrp  = curChar and curChar:FindFirstChild("HumanoidRootPart") :: BasePart?
-                        if curHrp and getDistance(curHrp.Position, startPos) >= CONJ_ARENA_DIST then
-                            teleported = true
-                            break
-                        end
+                        end)
                     end
+                end)
 
-                    pcall(keyrelease, E_KEY)
-                    camActive = false
-                    if not teleported then task.wait(0.5) end
+                -- Hold E to interact with mat
+                local startPos  = (player.Character.HumanoidRootPart :: BasePart).Position
+                local startTime = tick()
+                keypress(E_KEY); task.wait(0.1); keyrelease(E_KEY); task.wait(0.1)
+                keypress(E_KEY)
+
+                local teleported = false
+                while tick() - startTime < 25 and isConjFarmOn and isSafe() do
+                    task.wait(0.1)
+                    local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                    if curHrp and getDistance(curHrp.Position, startPos) >= CONJ_ARENA_DIST then
+                        teleported = true; break
+                    end
                 end
+
+                keyrelease(E_KEY)
+                camActive = false
+
+                if not teleported then
+                    task.wait(0.5)
+                    continue -- retry outer loop
+                end
+
+                task.wait(0.5)
             end
 
             if not isConjFarmOn or not isSafe() then continue end
 
-            -- PHASE 2: THE SELF NPC
-            local ok3, npcs = pcall(function() return workspace:FindFirstChild("Npcs") end)
-            local theSelf   = ok3 and npcs and npcs:FindFirstChild("The Self")
-            local selfHrp   = theSelf and theSelf:FindFirstChild("HumanoidRootPart") :: BasePart?
+            -- ----------------------------------------
+            -- PHASE 2: INTERACT WITH THE SELF NPC
+            -- ----------------------------------------
+            local selfHrp: BasePart? = nil
+            pcall(function()
+                local npcs    = workspace:FindFirstChild("Npcs")
+                local theSelf = npcs and npcs:FindFirstChild("The Self")
+                selfHrp       = theSelf and theSelf:FindFirstChild("HumanoidRootPart") :: BasePart?
+            end)
 
             if selfHrp and isConjFarmOn and isSafe() then
-                local inArena  = false
-                local loopGuard2 = 0
+                -- Teleport in front of NPC
+                local tpStart = tick()
+                while isConjFarmOn and isSafe() do
+                    local r = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                    if not r or not selfHrp.Parent then break end
+                    local targetPos = (selfHrp.CFrame * CFrame.new(0, 0, -3)).Position
+                    if getDistance(r.Position, targetPos) < 10 then break end
+                    r.CFrame = CFrame.lookAt(targetPos, selfHrp.Position)
+                    task.wait(0.15)
+                    if tick() - tpStart > 10 then break end
+                end
 
-                while not inArena and isConjFarmOn and isSafe() do
-                    loopGuard2 += 1
-                    if loopGuard2 > 20 then break end
-                    if not selfHrp.Parent then break end
+                if not isConjFarmOn or not isSafe() then continue end
+                task.wait(0.5)
 
-                    local targetCF  = selfHrp.CFrame * CFrame.new(0, 0, -3)
-                    local tpStart2  = tick()
-
-                    while isConjFarmOn and isSafe() do
-                        local r = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-                        if not r then break end
-                        if getDistance(r.Position, targetCF.Position) < 10 then break end
-                        r.CFrame = CFrame.lookAt(targetCF.Position, selfHrp.Position)
-                        task.wait(0.1)
-                        if tick() - tpStart2 > 10 then break end
-                    end
-
-                    if not isSafe() then break end
-                    task.wait(0.5)
-
-                    local charNow2 = player.Character
-                    if not charNow2 then break end
-                    local startPos2 = (charNow2:FindFirstChild("HumanoidRootPart") :: BasePart).Position
-
+                pcall(function()
                     keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                     task.wait(0.05)
                     keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
-                    task.wait(0.2)
+                end)
+                task.wait(0.2)
 
-                    local interactStart2 = tick()
-                    keypress(E_KEY)
-                    task.wait(1.5)
+                local startPos  = (player.Character.HumanoidRootPart :: BasePart).Position
+                local startTime = tick()
+                keypress(E_KEY)
+                task.wait(1.5)
 
-                    while isConjFarmOn and isSafe() do
-                        task.wait(0.05)
-                        keypress(ONE_KEY); task.wait(0.01); keyrelease(ONE_KEY)
-                        local curHrp2 = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-                        if curHrp2 and getDistance(curHrp2.Position, startPos2) >= CONJ_ARENA_DIST then
-                            inArena = true; break
-                        end
-                        if findConjTarget() then inArena = true; break end
-                        if tick() - interactStart2 > 25 then break end
+                local inArena = false
+                while isConjFarmOn and isSafe() and tick() - startTime < 25 do
+                    task.wait(0.05)
+                    pcall(function() keypress(ONE_KEY); task.wait(0.01); keyrelease(ONE_KEY) end)
+                    local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                    if (curHrp and getDistance(curHrp.Position, startPos) >= CONJ_ARENA_DIST) or findConjTarget() then
+                        inArena = true; break
                     end
+                end
 
-                    pcall(keyrelease, E_KEY)
-                    pcall(keyrelease, ONE_KEY)
-                    if not inArena then task.wait(0.5) end
+                keyrelease(E_KEY)
+                keyrelease(ONE_KEY)
+
+                if not inArena then
+                    task.wait(0.5)
+                    continue
                 end
             end
         end
 
         if not isConjFarmOn or not isSafe() then continue end
 
+        -- ----------------------------------------
         -- PHASE 3: COMBAT
+        -- ----------------------------------------
         local target: {hrp: BasePart, hum: Humanoid}? = nil
         local waitStart = tick()
-
         while not target and isConjFarmOn and isSafe() do
             target = findConjTarget()
-            if target then break end
             task.wait(0.1)
             if tick() - waitStart > CONJ_MAX_WAIT then break end
         end
@@ -1109,36 +1115,33 @@ task.spawn(function()
         local conjLastSummon = 0
 
         while isConjFarmOn and isSafe() do
-            -- Validate target still alive
-            local ok4 = pcall(function()
-                if not target or not target.hum or not target.hum.Parent then
-                    error("dead")
-                end
-                if target.hum.Health <= 0 then error("dead") end
-            end)
-            if not ok4 then break end
-
             task.wait(0.05)
 
-            local combatChar = player.Character :: Model?
-            if not combatChar then break end
-            local combatRoot = combatChar:FindFirstChild("HumanoidRootPart") :: BasePart?
-            if not combatRoot then break end
+            -- Re-validate target each tick
+            local stillAlive = pcall(function()
+                assert(target.hum and target.hum.Parent and target.hum.Health > 0)
+            end)
+            if not stillAlive then break end
 
-            if not isStandOut(combatChar) and tick() - conjLastSummon > 3 then
+            local char = player.Character :: Model
+            local root = char:FindFirstChild("HumanoidRootPart") :: BasePart
+
+            if not isStandOut(char) and tick() - conjLastSummon > 3 then
                 keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY)
                 conjLastSummon = tick()
             end
 
-            if target.hrp and target.hrp.Parent then
-                combatRoot.CFrame = calculateCFrame(target.hrp, rMode, rChange)
-            end
+            pcall(function()
+                if target.hrp and target.hrp.Parent then
+                    root.CFrame = calculateCFrame(target.hrp, rMode, rChange)
+                end
+            end)
 
             if not isAttackingConj then
                 isAttackingConj = true
                 task.spawn(function()
                     for _, k in ipairs(ATTACK_KEYS) do
-                        if not isSafe() or not isConjFarmOn then break end
+                        if not isSafe() then break end
                         keypress(k); task.wait(0.01); keyrelease(k)
                     end
                     isAttackingConj = false
@@ -1146,17 +1149,17 @@ task.spawn(function()
             end
         end
 
-        -- PHASE 4: WAIT TO RETURN TO GROUND
-        if isConjFarmOn and isSafe() then
+        -- ----------------------------------------
+        -- PHASE 4: WAIT TO RETURN TO OVERWORLD
+        -- ----------------------------------------
+        if isConjFarmOn then
             local returnTimer = tick()
-            repeat
+            while isConjFarmOn and tick() - returnTimer < CONJ_MAX_WAIT do
                 task.wait(0.5)
-                local retChar = player.Character
-                local retHrp  = retChar and retChar:FindFirstChild("HumanoidRootPart") :: BasePart?
-                if not retHrp then break end
-                if retHrp.Position.Y < CONJ_Y_MIN then break end
-                if tick() - returnTimer > CONJ_MAX_WAIT then break end
-            until not isConjFarmOn or not isSafe()
+                local curChar = player.Character
+                local curHrp  = curChar and curChar:FindFirstChild("HumanoidRootPart") :: BasePart?
+                if not curHrp or curHrp.Position.Y < CONJ_Y_MIN then break end
+            end
             task.wait(1)
         end
     end
