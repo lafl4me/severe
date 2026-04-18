@@ -1087,7 +1087,7 @@ end
 -- ==========================================
 -- MODULE 1: RANDOMIZED KILLING
 -- ==========================================
-local isAttacking1 = false  -- CHANGED: was shared `isAttacking`
+local isAbilityFiring1 = false
 
 task.spawn(function()
     while true do
@@ -1104,46 +1104,142 @@ task.spawn(function()
         if not isStandOut(char) and (OsClock() - lastSummonTime) > 3 then forceSummon() end
 
         local liveFolder = Workspace:FindFirstChild("Live")
-        if liveFolder then
-            local closestTarget = nil
-            local minDist = MathHuge
-            local myPos = root.Position
+        if not liveFolder then continue end
 
-            for _, v in liveFolder:GetChildren() do
-                if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char then
+        local closestTarget = nil
+        local minDist = MathHuge
+        local myPos = root.Position
 
-                    if isWhitelisted(v) then continue end
-
-                    local name = StringLower(v.Name)
-                    if not (StringFind(name, "hostage", 1, true) or StringFind(name, "citizen", 1, true)) then
-                        local mobHum = v:FindFirstChildOfClass("Humanoid")
-                        if mobHum and mobHum.Health > 0 then
-                            local hrp = v.HumanoidRootPart
-                            local tPos = hrp.Position
-                            if tPos.Y > MIN_Y_LEVEL then
-                                local dist = VectorMagnitude(myPos - tPos)
-                                if dist < minDist and dist < MAX_DISTANCE then
-                                    minDist = dist
-                                    closestTarget = hrp
-                                end
+        for _, v in liveFolder:GetChildren() do
+            if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char then
+                if isWhitelisted(v) then continue end
+                local name = StringLower(v.Name)
+                if not (StringFind(name, "hostage", 1, true) or StringFind(name, "citizen", 1, true)) then
+                    local mobHum = v:FindFirstChildOfClass("Humanoid")
+                    if mobHum and mobHum.Health > 0 then
+                        local hrp = v.HumanoidRootPart
+                        local tPos = hrp.Position
+                        if tPos.Y > MIN_Y_LEVEL then
+                            local dist = VectorMagnitude(myPos - tPos)
+                            if dist < minDist and dist < MAX_DISTANCE then
+                                minDist = dist
+                                closestTarget = hrp
                             end
                         end
                     end
                 end
             end
+        end
 
-            if closestTarget then
-                root.CFrame = calculateTargetCFrame(closestTarget)
-                if not isAttacking1 then  -- CHANGED
-                    isAttacking1 = true   -- CHANGED
-                    task.spawn(function()
-                        if mouse1press then mouse1press(); task.wait(0.05); mouse1release() end  -- CHANGED: 0.05 was 0.01+rand
-                        if keypress then
-                            for _, k in ATTACK_KEYS do keypress(k); task.wait(0.01 + MathRandom()*0.01); keyrelease(k) end
-                        end
-                        isAttacking1 = false  -- CHANGED
-                    end)
+        if closestTarget then
+            root.CFrame = calculateTargetCFrame(closestTarget)
+
+            -- M1: always spam, no gate
+            if mouse1press then
+                mouse1press()
+                task.wait(0.05)
+                mouse1release()
+            end
+
+            -- Abilities: gated separately so M1 is never blocked
+            if not isAbilityFiring1 and keypress then
+                isAbilityFiring1 = true
+                task.spawn(function()
+                    for _, k in ATTACK_KEYS do
+                        keypress(k)
+                        task.wait(0.01 + MathRandom() * 0.01)
+                        keyrelease(k)
+                    end
+                    isAbilityFiring1 = false
+                end)
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- MODULE 2: SPECIFIC TARGET FARM (Mob OR Player)
+-- ==========================================
+local isAbilityFiring2 = false
+
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        if not isMobFarmOn then continue end
+
+        local hasMobTarget = (selectedMob and selectedMob ~= "None" and selectedMob ~= "")
+        local hasPlayerTarget = (selectedPlayerTarget and selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "")
+
+        if not hasMobTarget and not hasPlayerTarget then continue end
+
+        local char = player.Character
+        if not char then continue end
+
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not root or not hum or hum.Health <= 0 then continue end
+
+        if not isStandOut(char) and (OsClock() - lastSummonTime) > 3 then forceSummon() end
+
+        local activeTargetKeyword = StringMatch(selectedMob, "^(.-) %(") or selectedMob
+
+        local liveFolder = Workspace:FindFirstChild("Live")
+        if not liveFolder then continue end
+
+        local closestTarget = nil
+        local minDist = MathHuge
+        local myPos = root.Position
+
+        for _, v in liveFolder:GetChildren() do
+            if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char then
+                if isWhitelisted(v) then continue end
+
+                local isTarget = false
+                if hasMobTarget and StringFind(v.Name, activeTargetKeyword, 1, true) then
+                    isTarget = true
                 end
+                if hasPlayerTarget and v.Name == selectedPlayerTarget then
+                    isTarget = true
+                end
+
+                if isTarget then
+                    local mobHum = v:FindFirstChildOfClass("Humanoid")
+                    if mobHum and mobHum.Health > 0 then
+                        local hrp = v.HumanoidRootPart
+                        local tPos = hrp.Position
+                        if tPos.Y > MIN_Y_LEVEL then
+                            local dist = VectorMagnitude(myPos - tPos)
+                            if dist < minDist then
+                                minDist = dist
+                                closestTarget = hrp
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if closestTarget then
+            root.CFrame = calculateTargetCFrame(closestTarget)
+
+            -- M1: always spam, no gate
+            if mouse1press then
+                mouse1press()
+                task.wait(0.05)
+                mouse1release()
+            end
+
+            -- Abilities: gated separately so M1 is never blocked
+            if not isAbilityFiring2 and keypress then
+                isAbilityFiring2 = true
+                task.spawn(function()
+                    for _, k in ATTACK_KEYS do
+                        keypress(k)
+                        task.wait(0.01 + MathRandom() * 0.01)
+                        keyrelease(k)
+                    end
+                    isAbilityFiring2 = false
+                end)
             end
         end
     end
