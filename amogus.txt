@@ -17,13 +17,13 @@ end
 -- ==========================================
 -- CONSTANTS
 -- ==========================================
-local FOLDER_PATH    = "BZL"
-local SLOT_COUNT     = 6
-local MIN_Y_LEVEL    = -150
-local MAX_DISTANCE   = 2500
-local CONJ_Y_MIN     = 10000
+local FOLDER_PATH     = "BZL"
+local SLOT_COUNT      = 6
+local MIN_Y_LEVEL     = -150
+local MAX_DISTANCE    = 2500
+local CONJ_Y_MIN      = 10000
 local CONJ_ARENA_DIST = 40
-local CONJ_MAX_WAIT  = 30
+local CONJ_MAX_WAIT   = 30
 
 local E_KEY   = 0x45
 local A_KEY   = 0x41
@@ -120,13 +120,13 @@ end
 -- ==========================================
 local function SerializeConfig(cfg: {[string]: any}): string
     local lines = {
-        "HitPosition:"      .. tostring(cfg.HitPosition),
-        "OffsetDistance:"   .. tostring(cfg.OffsetDistance),
-        "RandomSwitchSpeed:".. tostring(cfg.RandomSwitchSpeed),
-        "SummonKeyStr:"     .. tostring(cfg.SummonKeyStr),
-        "AttackKeyStrs:"    .. table.concat(cfg.AttackKeyStrs :: {string}, ","),
-        "WhitelistedNames:" .. table.concat(cfg.WhitelistedNames :: {string}, ","),
-        "TargetPlayer:"     .. tostring(cfg.TargetPlayer or "None"),
+        "HitPosition:"       .. tostring(cfg.HitPosition),
+        "OffsetDistance:"    .. tostring(cfg.OffsetDistance),
+        "RandomSwitchSpeed:" .. tostring(cfg.RandomSwitchSpeed),
+        "SummonKeyStr:"      .. tostring(cfg.SummonKeyStr),
+        "AttackKeyStrs:"     .. table.concat(cfg.AttackKeyStrs :: {string}, ","),
+        "WhitelistedNames:"  .. table.concat(cfg.WhitelistedNames :: {string}, ","),
+        "TargetPlayer:"      .. tostring(cfg.TargetPlayer or "None"),
     }
     return table.concat(lines, "\n")
 end
@@ -180,30 +180,27 @@ local Config: {[string]: any} = {
     TargetPlayer      = "None",
 }
 
--- Auto-load first found slot
 local AutoLoadedName: string? = nil
 local currentSelectedSlot = "Config 1"
 
 for i = 1, SLOT_COUNT do
-    local baseName  = "Config " .. i
-    local filePath  = FOLDER_PATH .. "/" .. baseName .. ".txt"
+    local baseName = "Config " .. i
+    local filePath = FOLDER_PATH .. "/" .. baseName .. ".txt"
     if isfile and isfile(filePath) and readfile then
         local ok, result = pcall(function() return DeserializeConfig(readfile(filePath)) end)
         if ok and type(result) == "table" then
             for k, v in pairs(result) do Config[k] = v end
-            AutoLoadedName   = baseName
+            AutoLoadedName      = baseName
             currentSelectedSlot = baseName
             break
         end
     end
 end
 
--- Ensure required fields exist after load
 if not Config.RandomSwitchSpeed then Config.RandomSwitchSpeed = 2 end
 if not Config.WhitelistedNames   then Config.WhitelistedNames  = {} end
 if not Config.TargetPlayer        then Config.TargetPlayer       = "None" end
 
--- Apply keybinds from config
 SUMMON_KEY  = KEY_MAP[Config.SummonKeyStr] or 0x51
 ATTACK_KEYS = {}
 for _, s in ipairs(Config.AttackKeyStrs :: {string}) do
@@ -217,30 +214,21 @@ local isLobbyFarmOn = false
 local isConjFarmOn  = false
 local isMobFarmOn   = false
 
--- Per-module attacking flags (no shared race condition)
 local isAttackingLobby = false
 local isAttackingMob   = false
 local isAttackingConj  = false
 
-local hitPosition       = Config.HitPosition
-local OFFSET_DISTANCE   = Config.OffsetDistance :: number
+local hitPosition         = Config.HitPosition
+local OFFSET_DISTANCE     = Config.OffsetDistance :: number
 local RANDOM_SWITCH_SPEED = Config.RandomSwitchSpeed :: number
 
 local selectedMob          = "None"
 local selectedPlayerTarget = Config.TargetPlayer :: string
 
--- Shared random-mode state (per-module to avoid cross-contamination)
-local lobbyRandomMode   = "Above"
-local lobbyRandomChange = 0
-local mobRandomMode     = "Above"
-local mobRandomChange   = 0
-local conjRandomMode    = "Above"
-local conjRandomChange  = 0
-
 local lastSummonTime = 0
 
 -- ==========================================
--- HEADLESS AUTOFARM (V5 _G.Settings path)
+-- HEADLESS AUTOFARM (V5)
 -- ==========================================
 local isHeadless = (
     _G.Settings ~= nil and
@@ -257,7 +245,7 @@ if isHeadless then
     local headlessSwitchSpd  = cfg.autofarm.speed    or 1
     local headlessOffsetDist = cfg.autofarm.distance  or 10
 
-    local headlessSummonStr  = cleanKey(cfg.keybinds and cfg.keybinds.summon or "Q")
+    local headlessSummonStr = cleanKey(cfg.keybinds and cfg.keybinds.summon or "Q")
     local headlessAttackStrs: {string} = {}
     for _, k in ipairs(cfg.keybinds and cfg.keybinds.attack or {"E","R","Z","X","C","V"}) do
         table.insert(headlessAttackStrs, cleanKey(k))
@@ -275,11 +263,11 @@ if isHeadless then
     local hlAttacking    = false
     local hlLastChar     = nil
 
-    local PLAY_SCALE_X   = 0.5213541666666667
-    local PLAY_SCALE_Y   = 0.6333002973240832
-    local RETRY_SCALE_X  = 0.5494791666666666
-    local RETRY_SCALE_Y  = 0.6950
-    local TOPBAR_OFFSET  = 36
+    local PLAY_SCALE_X  = 0.5213541666666667
+    local PLAY_SCALE_Y  = 0.6333002973240832
+    local RETRY_SCALE_X = 0.5494791666666666
+    local RETRY_SCALE_Y = 0.6950
+    local TOPBAR_OFFSET = 36
 
     local function hlClickAtScale(sx: number, sy: number)
         local cam = workspace.CurrentCamera
@@ -302,7 +290,6 @@ if isHeadless then
         while true do
             task.wait(0.5)
             if not isMasterToggleOn then emptyTimer = 0; continue end
-
             local c = player.Character
             local inGame = (
                 c ~= nil and
@@ -310,7 +297,6 @@ if isHeadless then
                 c:FindFirstChildOfClass("Humanoid") ~= nil and
                 (c:FindFirstChildOfClass("Humanoid") :: Humanoid).Health > 0
             )
-
             if not inGame then
                 emptyTimer = 0
                 hlClickAtScale(PLAY_SCALE_X, PLAY_SCALE_Y)
@@ -342,16 +328,31 @@ if isHeadless then
         end
     end)
 
+    -- Dedicated M1 hold thread
+    task.spawn(function()
+        local holding = false
+        while true do
+            task.wait(0.01)
+            local shouldHold = isMasterToggleOn and isSafe()
+            if shouldHold and not holding then
+                if mouse1press then mouse1press() end
+                holding = true
+            elseif not shouldHold and holding then
+                if mouse1release then mouse1release() end
+                holding = false
+            end
+        end
+    end)
+
     -- Combat loop
     task.spawn(function()
         while true do
             task.wait(0.05)
             if not isSafe() then continue end
 
-            local c    = player.Character
+            local c    = player.Character :: Model
             local root = c:FindFirstChild("HumanoidRootPart") :: BasePart
 
-            -- Summon on new character
             if c ~= hlLastChar then
                 hlLastChar = c
                 task.wait(2.5)
@@ -379,13 +380,13 @@ if isHeadless then
                 local nm = v.Name:lower()
                 if not (string.sub(nm,1,1) == ".") then continue end
                 if string.find(nm,"hostage") or string.find(nm,"citizen") or string.find(nm,"server") then continue end
-                local mh = v:FindFirstChildOfClass("Humanoid")
+                local mh  = v:FindFirstChildOfClass("Humanoid")
                 local hrp = v:FindFirstChild("HumanoidRootPart") :: BasePart
                 if mh and mh.Health > 0 and hrp.Position.Y >= MIN_Y_LEVEL then
                     local d = getDistance(myPos, hrp.Position)
                     if d < minDist and d < MAX_DISTANCE then
-                        minDist  = d
-                        closest  = hrp
+                        minDist = d
+                        closest = hrp
                     end
                 end
             end
@@ -410,18 +411,17 @@ if isHeadless then
             end
 
             local cf: CFrame
-            if      mode == "Above"  then cf = CFrame.lookAt(pos + Vector3.new(0, headlessOffsetDist, 0), pos)
-            elseif  mode == "Below"  then cf = CFrame.lookAt(pos + Vector3.new(0,-headlessOffsetDist, 0), pos)
+            if      mode == "Above"  then cf = CFrame.lookAt(pos + Vector3.new(0,  headlessOffsetDist, 0), pos)
+            elseif  mode == "Below"  then cf = CFrame.lookAt(pos + Vector3.new(0, -headlessOffsetDist, 0), pos)
             elseif  mode == "Behind" then cf = CFrame.lookAt(pos - look * headlessOffsetDist, pos)
             elseif  mode == "Middle" then cf = CFrame.lookAt(pos + look * 2.5, pos)
-            else                          cf = CFrame.lookAt(pos + Vector3.new(0, headlessOffsetDist, 0), pos)
+            else                          cf = CFrame.lookAt(pos + Vector3.new(0,  headlessOffsetDist, 0), pos)
             end
             root.CFrame = cf
 
             if not hlAttacking then
                 hlAttacking = true
                 task.spawn(function()
-                    if mouse1press then mouse1press(); task.wait(0.01 + math.random()*0.02); mouse1release() end
                     for _, k in ipairs(headlessAttackKeys) do
                         if not isSafe() then break end
                         keypress(k); task.wait(0.01 + math.random()*0.01); keyrelease(k)
@@ -432,7 +432,7 @@ if isHeadless then
         end
     end)
 
-    return -- Headless path ends here
+    return
 end
 
 -- ==============================================================================
@@ -467,7 +467,6 @@ local function getGroupedMobs(): {string}
     end
     table.sort(result)
     table.insert(result, 1, "None")
-    -- Preserve selected if not in list
     if selectedMob ~= "None" and selectedMob ~= "" then
         local found = false
         for _, m in ipairs(result) do if m == selectedMob then found = true; break end end
@@ -534,7 +533,7 @@ local function forceSummon()
 end
 
 -- ==========================================
--- POSITION CALCULATOR (per-module state)
+-- POSITION CALCULATOR
 -- ==========================================
 local function calculateCFrame(
     targetRoot: BasePart,
@@ -560,26 +559,29 @@ local function calculateCFrame(
         mode = randomModeRef.value
     end
 
-    if      mode == "Above"  then return CFrame.lookAt(pos + Vector3.new(0, OFFSET_DISTANCE, 0), pos)
-    elseif  mode == "Below"  then return CFrame.lookAt(pos + Vector3.new(0,-OFFSET_DISTANCE, 0), pos)
+    if      mode == "Above"  then return CFrame.lookAt(pos + Vector3.new(0,  OFFSET_DISTANCE, 0), pos)
+    elseif  mode == "Below"  then return CFrame.lookAt(pos + Vector3.new(0, -OFFSET_DISTANCE, 0), pos)
     elseif  mode == "Behind" then return CFrame.lookAt(pos - look * OFFSET_DISTANCE, pos)
     elseif  mode == "Middle" then return CFrame.lookAt(pos + look * 2.5, pos)
-    else                          return CFrame.lookAt(pos + Vector3.new(0, OFFSET_DISTANCE, 0), pos)
+    else                          return CFrame.lookAt(pos + Vector3.new(0,  OFFSET_DISTANCE, 0), pos)
     end
+end
+
+-- ==========================================
+-- UI ELEMENT UPDATER
+-- ==========================================
+local function UpdateUIElement(element: any, value: any)
+    if not element then return end
+    pcall(function()
+        if      type(element.Set)      == "function" then element:Set(value)
+        elseif  type(element.SetValue) == "function" then element:SetValue(value)
+        elseif  type(element.set)      == "function" then element:set(value) end
+    end)
 end
 
 -- ==========================================
 -- UI INIT
 -- ==========================================
-local function UpdateUIElement(element: any, value: any)
-    if not element then return end
-    pcall(function()
-        if type(element.Set)      == "function" then element:Set(value)
-        elseif type(element.SetValue) == "function" then element:SetValue(value)
-        elseif type(element.set)  == "function" then element:set(value) end
-    end)
-end
-
 local bytecode = game:HttpGet("https://github.com/misterzeee/SevereUiLib/raw/refs/heads/main/MainByteCode.lua")
 local uiFunc   = luau.load(bytecode)
 uiFunc()
@@ -658,9 +660,9 @@ local refreshWlBtn = lobbyTab:addButton({ text = "Refresh Players" })
 refreshWlBtn.OnClick:Connect(function()
     local newItems = getWhitelistItems()
     pcall(function()
-        if whitelistDrop.Refresh   then whitelistDrop:Refresh(newItems)
-        elseif whitelistDrop.update   then whitelistDrop:update(newItems)
-        elseif whitelistDrop.setItems then whitelistDrop:setItems(newItems) end
+        if      whitelistDrop.Refresh   then whitelistDrop:Refresh(newItems)
+        elseif  whitelistDrop.update    then whitelistDrop:update(newItems)
+        elseif  whitelistDrop.setItems  then whitelistDrop:setItems(newItems) end
     end)
     notify("Players list refreshed!")
 end)
@@ -670,8 +672,8 @@ end)
 -- ==========================================
 mobTab:addText({ text = "  [ ENTITY SELECTION ]  " })
 
-local initialMobs   = getGroupedMobs()
-local mobDropdown   = mobTab:addDropdown({ text = "Target NPC / Mob", items = initialMobs, defaultIndex = getIndex(initialMobs, selectedMob) })
+local initialMobs = getGroupedMobs()
+local mobDropdown = mobTab:addDropdown({ text = "Target NPC / Mob", items = initialMobs, defaultIndex = getIndex(initialMobs, selectedMob) })
 mobDropdown.OnChanged:Connect(function(val)
     if type(val) == "string" then selectedMob = val; if _G.UpdateLiveState then _G.UpdateLiveState() end end
 end)
@@ -680,9 +682,9 @@ local refreshMobBtn = mobTab:addButton({ text = "Refresh & Group Mobs" })
 refreshMobBtn.OnClick:Connect(function()
     local refMobs = getGroupedMobs()
     pcall(function()
-        if mobDropdown.Refresh   then mobDropdown:Refresh(refMobs)
-        elseif mobDropdown.update   then mobDropdown:update(refMobs)
-        elseif mobDropdown.setItems then mobDropdown:setItems(refMobs) end
+        if      mobDropdown.Refresh   then mobDropdown:Refresh(refMobs)
+        elseif  mobDropdown.update    then mobDropdown:update(refMobs)
+        elseif  mobDropdown.setItems  then mobDropdown:setItems(refMobs) end
     end)
     notify("Mobs refreshed!")
 end)
@@ -704,9 +706,9 @@ local refreshPlrBtn = mobTab:addButton({ text = "Refresh Players" })
 refreshPlrBtn.OnClick:Connect(function()
     local refPlrs = getPlayerNames()
     pcall(function()
-        if playerDropdown.Refresh   then playerDropdown:Refresh(refPlrs)
-        elseif playerDropdown.update   then playerDropdown:update(refPlrs)
-        elseif playerDropdown.setItems then playerDropdown:setItems(refPlrs) end
+        if      playerDropdown.Refresh   then playerDropdown:Refresh(refPlrs)
+        elseif  playerDropdown.update    then playerDropdown:update(refPlrs)
+        elseif  playerDropdown.setItems  then playerDropdown:setItems(refPlrs) end
     end)
     notify("Players refreshed!")
 end)
@@ -730,21 +732,21 @@ combatTab:addText({ text = "Check 'Live Bot State' in Config tab for actuals." }
 local posOptions = {"Above","Below","Behind","Middle","Random","Up & down"}
 local posDrop = combatTab:addDropdown({ text = "Hit Position", items = posOptions, defaultIndex = getIndex(posOptions, Config.HitPosition :: string) })
 posDrop.OnChanged:Connect(function(val)
-    hitPosition     = val
+    hitPosition        = val
     Config.HitPosition = val
     if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
 local distSlider = combatTab:addSlider({ text = "Offset Distance", min = 5, max = 20, mode = "number", default = Config.OffsetDistance })
 distSlider.OnChanged:Connect(function(val)
-    OFFSET_DISTANCE     = val
+    OFFSET_DISTANCE       = val
     Config.OffsetDistance = val
     if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
 local randSpeedSlider = combatTab:addSlider({ text = "Switch Delay", min = 1, max = 10, mode = "number", default = Config.RandomSwitchSpeed })
 randSpeedSlider.OnChanged:Connect(function(val)
-    RANDOM_SWITCH_SPEED     = val
+    RANDOM_SWITCH_SPEED      = val
     Config.RandomSwitchSpeed = val
     if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
@@ -755,8 +757,8 @@ combatTab:addText({ text = "  [ CUSTOM KEYBINDS ]  " })
 local summonKeyDrop = combatTab:addDropdown({ text = "Stand Keybind", items = ALL_KEYS, defaultIndex = getIndex(ALL_KEYS, Config.SummonKeyStr :: string) })
 summonKeyDrop.OnChanged:Connect(function(val)
     if type(val) == "string" and KEY_MAP[val] then
-        SUMMON_KEY           = KEY_MAP[val]
-        Config.SummonKeyStr  = val
+        SUMMON_KEY          = KEY_MAP[val]
+        Config.SummonKeyStr = val
         if _G.UpdateLiveState then _G.UpdateLiveState() end
     end
 end)
@@ -768,8 +770,8 @@ end
 
 local attackKeysDrop = combatTab:addDropdown({ text = "Combat Keybinds", items = ALL_KEYS, defaultIndices = loadedAtkIndices })
 attackKeysDrop.OnChanged:Connect(function(_, values)
-    ATTACK_KEYS           = {}
-    Config.AttackKeyStrs  = {}
+    ATTACK_KEYS          = {}
+    Config.AttackKeyStrs = {}
     for _, letter in ipairs(values or {}) do
         if KEY_MAP[letter] then
             table.insert(ATTACK_KEYS, KEY_MAP[letter])
@@ -797,13 +799,13 @@ end)
 tpTab:addText({ text = "  [ MAP LOCATIONS ]  " })
 
 local tpLocations = {
-    { name = "Gym",                 pos = Vector3.new(1158.18,  884.23,   15.51) },
-    { name = "Hospital",            pos = Vector3.new(-176.23,  912.65, -433.50) },
-    { name = "Morioh Station",      pos = Vector3.new(1194.91,  877.64, -734.11) },
-    { name = "Graveyard Mansion 1", pos = Vector3.new(2669.68,  949.90,  810.78) },
-    { name = "Graveyard Mansion 2", pos = Vector3.new(2899.12,  949.73, 1462.34) },
-    { name = "Store",               pos = Vector3.new(686.41,   896.76, -654.10) },
-    { name = "Docks",               pos = Vector3.new(-1471.51, 910.20,  537.61) },
+    { name = "Gym",                 pos = Vector3.new(1158.18,   884.23,   15.51) },
+    { name = "Hospital",            pos = Vector3.new(-176.23,   912.65, -433.50) },
+    { name = "Morioh Station",      pos = Vector3.new(1194.91,   877.64, -734.11) },
+    { name = "Graveyard Mansion 1", pos = Vector3.new(2669.68,   949.90,  810.78) },
+    { name = "Graveyard Mansion 2", pos = Vector3.new(2899.12,   949.73, 1462.34) },
+    { name = "Store",               pos = Vector3.new(686.41,    896.76, -654.10) },
+    { name = "Docks",               pos = Vector3.new(-1471.51,  910.20,  537.61) },
 }
 
 for _, loc in ipairs(tpLocations) do
@@ -836,9 +838,9 @@ local refreshTpPlrBtn = tpTab:addButton({ text = "Refresh Players" })
 refreshTpPlrBtn.OnClick:Connect(function()
     local refPlrs = getPlayerNames()
     pcall(function()
-        if tpPlayerDrop.Refresh   then tpPlayerDrop:Refresh(refPlrs)
-        elseif tpPlayerDrop.update   then tpPlayerDrop:update(refPlrs)
-        elseif tpPlayerDrop.setItems then tpPlayerDrop:setItems(refPlrs) end
+        if      tpPlayerDrop.Refresh   then tpPlayerDrop:Refresh(refPlrs)
+        elseif  tpPlayerDrop.update    then tpPlayerDrop:update(refPlrs)
+        elseif  tpPlayerDrop.setItems  then tpPlayerDrop:setItems(refPlrs) end
     end)
     notify("Player list refreshed!")
 end)
@@ -901,14 +903,14 @@ local configCount  = setTab:addText({ text = "Found " .. initCount .. " configs 
 local function refreshConfigUI()
     local newSlots, newCount = getSlotsAndCount()
     pcall(function()
-        if configDrop.Refresh   then configDrop:Refresh(newSlots)
-        elseif configDrop.update   then configDrop:update(newSlots)
-        elseif configDrop.setItems then configDrop:setItems(newSlots) end
+        if      configDrop.Refresh   then configDrop:Refresh(newSlots)
+        elseif  configDrop.update    then configDrop:update(newSlots)
+        elseif  configDrop.setItems  then configDrop:setItems(newSlots) end
     end)
     pcall(function() configCount:setText("Found " .. newCount .. " configs in folder.") end)
 end
 
--- Live state labels (declared before _G.UpdateLiveState so closure is valid)
+-- Live state labels declared before _G.UpdateLiveState closure
 setTab:addText({ text = " " })
 setTab:addText({ text = "  [ LIVE BOT STATE ]  " })
 local liveState1 = setTab:addText({ text = "..." })
@@ -917,9 +919,9 @@ local liveState3 = setTab:addText({ text = "..." })
 local liveState4 = setTab:addText({ text = "..." })
 
 _G.UpdateLiveState = function()
-    local atkStr    = table.concat(Config.AttackKeyStrs :: {string}, ", ")
-    local wlCount   = #(Config.WhitelistedNames :: {string})
-    local cleanTgt  = string.match(selectedMob, "^(.-) %(") or selectedMob
+    local atkStr   = table.concat(Config.AttackKeyStrs :: {string}, ", ")
+    local wlCount  = #(Config.WhitelistedNames :: {string})
+    local cleanTgt = string.match(selectedMob, "^(.-) %(") or selectedMob
 
     local s1 = string.format("Position: %s | Dist: %d | Delay: %ds", tostring(hitPosition), OFFSET_DISTANCE, RANDOM_SWITCH_SPEED)
     local s2 = string.format("Stand: %s | Atk: [%s]", tostring(Config.SummonKeyStr), atkStr)
@@ -939,7 +941,6 @@ _G.UpdateLiveState = function()
     end)
 end
 
--- Buttons
 local saveBtn = setTab:addButton({ text = "Save to Selected Slot" })
 saveBtn.OnClick:Connect(function()
     if not writefile then notify("Executor does not support file writing."); return end
@@ -993,7 +994,6 @@ loadBtn.OnClick:Connect(function()
     if not Config.WhitelistedNames   then Config.WhitelistedNames  = {} end
     if not Config.TargetPlayer        then Config.TargetPlayer       = "None" end
 
-    -- Apply to runtime vars
     hitPosition          = Config.HitPosition
     OFFSET_DISTANCE      = Config.OffsetDistance
     RANDOM_SWITCH_SPEED  = Config.RandomSwitchSpeed
@@ -1005,7 +1005,6 @@ loadBtn.OnClick:Connect(function()
         if KEY_MAP[s] then table.insert(ATTACK_KEYS, KEY_MAP[s]) end
     end
 
-    -- Attempt UI sync
     UpdateUIElement(posDrop,         Config.HitPosition)
     UpdateUIElement(distSlider,      Config.OffsetDistance)
     UpdateUIElement(randSpeedSlider, Config.RandomSwitchSpeed)
@@ -1025,7 +1024,6 @@ refreshCfgBtn.OnClick:Connect(function()
     notify("Config list refreshed!")
 end)
 
--- Populate live state on load
 if _G.UpdateLiveState then _G.UpdateLiveState() end
 
 if AutoLoadedName then
@@ -1041,6 +1039,22 @@ end
 task.spawn(function()
     local rMode   = { value = "Above" }
     local rChange = { value = 0 }
+
+    -- Dedicated M1 hold thread
+    task.spawn(function()
+        local holding = false
+        while true do
+            task.wait(0.01)
+            local shouldHold = isLobbyFarmOn and isSafe()
+            if shouldHold and not holding then
+                if mouse1press then mouse1press() end
+                holding = true
+            elseif not shouldHold and holding then
+                if mouse1release then mouse1release() end
+                holding = false
+            end
+        end
+    end)
 
     while true do
         task.wait(0.05)
@@ -1075,13 +1089,15 @@ task.spawn(function()
 
         root.CFrame = calculateCFrame(closest, rMode, rChange)
 
+        -- Abilities fire independently of M1
         if not isAttackingLobby then
             isAttackingLobby = true
             task.spawn(function()
-                if mouse1press then mouse1press(); task.wait(0.01 + math.random()*0.02); mouse1release() end
                 for _, k in ipairs(ATTACK_KEYS) do
-                    if not isSafe() then break end
-                    keypress(k); task.wait(0.01 + math.random()*0.01); keyrelease(k)
+                    if not isSafe() or not isLobbyFarmOn then break end
+                    keypress(k)
+                    task.wait(0.01 + math.random() * 0.01)
+                    keyrelease(k)
                 end
                 isAttackingLobby = false
             end)
@@ -1095,6 +1111,22 @@ end)
 task.spawn(function()
     local rMode   = { value = "Above" }
     local rChange = { value = 0 }
+
+    -- Dedicated M1 hold thread
+    task.spawn(function()
+        local holding = false
+        while true do
+            task.wait(0.01)
+            local shouldHold = isMobFarmOn and isSafe()
+            if shouldHold and not holding then
+                if mouse1press then mouse1press() end
+                holding = true
+            elseif not shouldHold and holding then
+                if mouse1release then mouse1release() end
+                holding = false
+            end
+        end
+    end)
 
     while true do
         task.wait(0.05)
@@ -1142,10 +1174,11 @@ task.spawn(function()
         if not isAttackingMob then
             isAttackingMob = true
             task.spawn(function()
-                if mouse1press then mouse1press(); task.wait(0.01 + math.random()*0.02); mouse1release() end
                 for _, k in ipairs(ATTACK_KEYS) do
-                    if not isSafe() then break end
-                    keypress(k); task.wait(0.01 + math.random()*0.01); keyrelease(k)
+                    if not isSafe() or not isMobFarmOn then break end
+                    keypress(k)
+                    task.wait(0.01 + math.random() * 0.01)
+                    keyrelease(k)
                 end
                 isAttackingMob = false
             end)
@@ -1167,15 +1200,13 @@ local function findConjTarget(): {hrp: BasePart, hum: Humanoid}?
     local myPos   = root.Position
 
     for _, v in ipairs(lf:GetChildren()) do
-        if not (v ~= char) then continue end
+        if v == char then continue end
         if isWhitelisted(v) then continue end
-
         local isPlr = false
         for _, p in ipairs(Players:GetChildren()) do
             if p:IsA("Player") and p.Character == v then isPlr = true; break end
         end
         if isPlr then continue end
-
         local mh  = v:FindFirstChildOfClass("Humanoid") :: Humanoid?
         local hrp = (v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")) :: BasePart?
         if hrp and mh and mh.Health > 0 and hrp.Position.Y > CONJ_Y_MIN then
@@ -1190,15 +1221,31 @@ task.spawn(function()
     local rMode   = { value = "Above" }
     local rChange = { value = 0 }
 
+    -- Dedicated M1 hold thread for conjuration combat phase
+    task.spawn(function()
+        local holding = false
+        while true do
+            task.wait(0.01)
+            local shouldHold = isConjFarmOn and isSafe() and (findConjTarget() ~= nil)
+            if shouldHold and not holding then
+                if mouse1press then mouse1press() end
+                holding = true
+            elseif not shouldHold and holding then
+                if mouse1release then mouse1release() end
+                holding = false
+            end
+        end
+    end)
+
     while true do
         task.wait(0.5)
         if not isConjFarmOn or not isSafe() then continue end
 
         -- PHASE 1: YOGA MAT
         if not findConjTarget() then
-            local mapObj    = workspace:FindFirstChild("Map")
-            local medit     = mapObj and mapObj:FindFirstChild("Meditation")
-            local yogaMat   = medit and medit:FindFirstChild("Yoga Mat") :: BasePart?
+            local mapObj  = workspace:FindFirstChild("Map")
+            local medit   = mapObj and mapObj:FindFirstChild("Meditation")
+            local yogaMat = medit and medit:FindFirstChild("Yoga Mat") :: BasePart?
 
             if yogaMat and isConjFarmOn and isSafe() then
                 local teleported = false
@@ -1216,13 +1263,12 @@ task.spawn(function()
                     if not isSafe() then break end
                     task.wait(0.5)
 
-                    local startPos  = (player.Character.HumanoidRootPart :: BasePart).Position
+                    local startPos = (player.Character.HumanoidRootPart :: BasePart).Position
                     keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                     task.wait(0.05)
                     keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
                     task.wait(0.2)
 
-                    -- Camera lock goroutine
                     local camActive = true
                     task.spawn(function()
                         while camActive and isConjFarmOn and isSafe() do
@@ -1257,12 +1303,12 @@ task.spawn(function()
             if not isConjFarmOn or not isSafe() then continue end
 
             -- PHASE 2: THE SELF
-            local npcs   = workspace:FindFirstChild("Npcs")
+            local npcs    = workspace:FindFirstChild("Npcs")
             local theSelf = npcs and npcs:FindFirstChild("The Self")
             local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart") :: BasePart?
 
             if selfHrp and isConjFarmOn and isSafe() then
-                local inArena  = false
+                local inArena = false
                 while not inArena and isConjFarmOn and isSafe() do
                     if not selfHrp.Parent then break end
 
@@ -1335,7 +1381,6 @@ task.spawn(function()
             if not isAttackingConj then
                 isAttackingConj = true
                 task.spawn(function()
-                    if mouse1press then mouse1press(); task.wait(0.01); mouse1release() end
                     for _, k in ipairs(ATTACK_KEYS) do
                         if not isSafe() then break end
                         keypress(k); task.wait(0.01); keyrelease(k)
