@@ -4,8 +4,7 @@
 -- ==========================================
 -- SERVICES
 -- ==========================================
-local Players    = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local Players          = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
@@ -17,8 +16,6 @@ end
 -- ==========================================
 -- CONSTANTS
 -- ==========================================
-local FOLDER_PATH     = "BZL"
-local SLOT_COUNT      = 6
 local MIN_Y_LEVEL     = -150
 local MAX_DISTANCE    = 2500
 local CONJ_Y_MIN      = 10000
@@ -52,11 +49,6 @@ local function notify(text: string)
     end)
 end
 
-local function trim(s: string?): string
-    if not s then return "" end
-    return (string.match(s, "^%s*(.-)%s*$") or "")
-end
-
 local function cleanKey(key: any): string
     if not key then return "Q" end
     local upper = string.upper(tostring(key))
@@ -82,7 +74,7 @@ end
 -- MASTER TOGGLE (F4)
 -- ==========================================
 local isMasterToggleOn = true
-local SUMMON_KEY = 0x51
+local SUMMON_KEY       = 0x51
 local ATTACK_KEYS: {number} = {}
 
 pcall(function()
@@ -116,98 +108,6 @@ local function isSafe(): boolean
 end
 
 -- ==========================================
--- CONFIG SYSTEM
--- ==========================================
-local function SerializeConfig(cfg: {[string]: any}): string
-    local lines = {
-        "HitPosition:"       .. tostring(cfg.HitPosition),
-        "OffsetDistance:"    .. tostring(cfg.OffsetDistance),
-        "RandomSwitchSpeed:" .. tostring(cfg.RandomSwitchSpeed),
-        "SummonKeyStr:"      .. tostring(cfg.SummonKeyStr),
-        "AttackKeyStrs:"     .. table.concat(cfg.AttackKeyStrs :: {string}, ","),
-        "WhitelistedNames:"  .. table.concat(cfg.WhitelistedNames :: {string}, ","),
-        "TargetPlayer:"      .. tostring(cfg.TargetPlayer or "None"),
-    }
-    return table.concat(lines, "\n")
-end
-
-local function DeserializeConfig(str: string): {[string]: any}
-    local cfg: {[string]: any} = {}
-    for line in string.gmatch(str, "[^\r\n]+") do
-        local key, val = string.match(line, "([^:]+):(.*)")
-        if key and val then
-            key = trim(key)
-            val = trim(val)
-            if key == "OffsetDistance" or key == "RandomSwitchSpeed" then
-                cfg[key] = tonumber(val) or 10
-            elseif key == "AttackKeyStrs" or key == "WhitelistedNames" then
-                local arr: {string} = {}
-                for k in string.gmatch(val, "([^,]+)") do
-                    local tk = trim(k)
-                    if tk ~= "" then table.insert(arr, tk) end
-                end
-                cfg[key] = arr
-            else
-                cfg[key] = val
-            end
-        end
-    end
-    return cfg
-end
-
--- ==========================================
--- INIT CONFIG
--- ==========================================
-if makefolder and isfolder and not isfolder(FOLDER_PATH) then
-    pcall(makefolder, FOLDER_PATH)
-end
-
-local rawSummonStr  = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q"
-local rawAttackStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E","R","Z","X","C","V"}
-
-local initAttackKeys: {string} = {}
-for _, k in ipairs(rawAttackStrs) do
-    table.insert(initAttackKeys, cleanKey(k))
-end
-
-local Config: {[string]: any} = {
-    HitPosition       = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.position) or "Above",
-    OffsetDistance    = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.distance) or 10,
-    RandomSwitchSpeed = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.speed)    or 2,
-    SummonKeyStr      = cleanKey(rawSummonStr),
-    AttackKeyStrs     = initAttackKeys,
-    WhitelistedNames  = {} :: {string},
-    TargetPlayer      = "None",
-}
-
-local AutoLoadedName: string? = nil
-local currentSelectedSlot = "Config 1"
-
-for i = 1, SLOT_COUNT do
-    local baseName = "Config " .. i
-    local filePath = FOLDER_PATH .. "/" .. baseName .. ".txt"
-    if isfile and isfile(filePath) and readfile then
-        local ok, result = pcall(function() return DeserializeConfig(readfile(filePath)) end)
-        if ok and type(result) == "table" then
-            for k, v in pairs(result) do Config[k] = v end
-            AutoLoadedName      = baseName
-            currentSelectedSlot = baseName
-            break
-        end
-    end
-end
-
-if not Config.RandomSwitchSpeed then Config.RandomSwitchSpeed = 2 end
-if not Config.WhitelistedNames   then Config.WhitelistedNames  = {} end
-if not Config.TargetPlayer        then Config.TargetPlayer       = "None" end
-
-SUMMON_KEY  = KEY_MAP[Config.SummonKeyStr] or 0x51
-ATTACK_KEYS = {}
-for _, s in ipairs(Config.AttackKeyStrs :: {string}) do
-    if KEY_MAP[s] then table.insert(ATTACK_KEYS, KEY_MAP[s]) end
-end
-
--- ==========================================
 -- RUNTIME STATE
 -- ==========================================
 local isLobbyFarmOn = false
@@ -218,14 +118,23 @@ local isAttackingLobby = false
 local isAttackingMob   = false
 local isAttackingConj  = false
 
-local hitPosition         = Config.HitPosition
-local OFFSET_DISTANCE     = Config.OffsetDistance :: number
-local RANDOM_SWITCH_SPEED = Config.RandomSwitchSpeed :: number
+local hitPosition         = "Above"
+local OFFSET_DISTANCE     = 10
+local RANDOM_SWITCH_SPEED = 2
 
 local selectedMob          = "None"
-local selectedPlayerTarget = Config.TargetPlayer :: string
+local selectedPlayerTarget = "None"
+local lastSummonTime       = 0
 
-local lastSummonTime = 0
+local summonKeyStr    = "Q"
+local attackKeyStrs: {string} = {"E","R","Z","X","C","V"}
+
+-- Apply defaults
+SUMMON_KEY  = KEY_MAP[summonKeyStr] or 0x51
+ATTACK_KEYS = {}
+for _, s in ipairs(attackKeyStrs) do
+    if KEY_MAP[s] then table.insert(ATTACK_KEYS, KEY_MAP[s]) end
+end
 
 -- ==========================================
 -- HEADLESS AUTOFARM (V5)
@@ -240,7 +149,7 @@ local isHeadless = (
 if isHeadless then
     print("[BZL Hub]: _G.Settings detected. Running V5 Headless Autofarm.")
 
-    local cfg = _G.Settings
+    local cfg                = _G.Settings
     local headlessHitPos     = cfg.autofarm.position or "Up & down"
     local headlessSwitchSpd  = cfg.autofarm.speed    or 1
     local headlessOffsetDist = cfg.autofarm.distance  or 10
@@ -284,7 +193,6 @@ if isHeadless then
         end
     end
 
-    -- Lobby/retry watcher
     task.spawn(function()
         local emptyTimer = 0
         while true do
@@ -328,7 +236,6 @@ if isHeadless then
         end
     end)
 
-    -- Dedicated M1 hold thread
     task.spawn(function()
         local holding = false
         while true do
@@ -344,7 +251,6 @@ if isHeadless then
         end
     end)
 
-    -- Combat loop
     task.spawn(function()
         while true do
             task.wait(0.05)
@@ -493,10 +399,12 @@ end
 -- ==========================================
 -- WHITELIST CHECK
 -- ==========================================
+local whitelistedNames: {string} = {}
+
 local function isWhitelisted(entity: Instance): boolean
     if not entity then return false end
     local entLow = string.lower(entity.Name)
-    for _, wName in ipairs(Config.WhitelistedNames :: {string}) do
+    for _, wName in ipairs(whitelistedNames) do
         if wName == "" then continue end
         local wLow = string.lower(wName)
         if entLow == wLow then return true end
@@ -568,18 +476,6 @@ local function calculateCFrame(
 end
 
 -- ==========================================
--- UI ELEMENT UPDATER
--- ==========================================
-local function UpdateUIElement(element: any, value: any)
-    if not element then return end
-    pcall(function()
-        if      type(element.Set)      == "function" then element:Set(value)
-        elseif  type(element.SetValue) == "function" then element:SetValue(value)
-        elseif  type(element.set)      == "function" then element:set(value) end
-    end)
-end
-
--- ==========================================
 -- UI INIT
 -- ==========================================
 local bytecode = game:HttpGet("https://github.com/misterzeee/SevereUiLib/raw/refs/heads/main/MainByteCode.lua")
@@ -609,12 +505,12 @@ local mobTab    = win:addTab("Target")
 local combatTab = win:addTab("Farm Setup")
 local conjTab   = win:addTab("Conjuration")
 local tpTab     = win:addTab("Teleports")
-local setTab    = win:addTab("Config")
 
 -- ==========================================
 -- TAB: RANDOMIZED
 -- ==========================================
 lobbyTab:addText({ text = "  [ RANDOMIZED KILLING ]  " })
+
 local lobbyCheck = lobbyTab:addCheckbox({ text = "Enable Autofarm", default = false })
 lobbyCheck.OnChanged:Connect(function(v)
     isLobbyFarmOn = v
@@ -627,7 +523,7 @@ lobbyTab:addText({ text = "  [ PLAYER WHITELIST ]  " })
 local function getWhitelistItems(): {string}
     local items: {string} = {}
     local seen: {[string]: boolean} = {}
-    for _, name in ipairs(Config.WhitelistedNames :: {string}) do
+    for _, name in ipairs(whitelistedNames) do
         if name ~= "" and not seen[name] then table.insert(items, name); seen[name] = true end
     end
     for _, p in ipairs(Players:GetChildren()) do
@@ -639,21 +535,13 @@ local function getWhitelistItems(): {string}
 end
 
 local wlItems: {string} = getWhitelistItems()
-local wlIndices: {number} = {}
-for i, val in ipairs(wlItems) do
-    for _, w in ipairs(Config.WhitelistedNames :: {string}) do
-        if val == w then table.insert(wlIndices, i) end
-    end
-end
-
-local whitelistDrop = lobbyTab:addDropdown({ text = "None", items = wlItems, defaultIndices = wlIndices })
+local whitelistDrop = lobbyTab:addDropdown({ text = "None", items = wlItems, defaultIndices = {} })
 whitelistDrop.OnChanged:Connect(function(val1, val2)
-    Config.WhitelistedNames = {}
+    whitelistedNames = {}
     local list = type(val2) == "table" and val2 or (type(val1) == "table" and val1 or {val1})
     for _, v in pairs(list) do
-        if type(v) == "string" and v ~= "" then table.insert(Config.WhitelistedNames :: {string}, v) end
+        if type(v) == "string" and v ~= "" then table.insert(whitelistedNames, v) end
     end
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
 local refreshWlBtn = lobbyTab:addButton({ text = "Refresh Players" })
@@ -673,9 +561,9 @@ end)
 mobTab:addText({ text = "  [ ENTITY SELECTION ]  " })
 
 local initialMobs = getGroupedMobs()
-local mobDropdown = mobTab:addDropdown({ text = "Target NPC / Mob", items = initialMobs, defaultIndex = getIndex(initialMobs, selectedMob) })
+local mobDropdown = mobTab:addDropdown({ text = "Target NPC / Mob", items = initialMobs, defaultIndex = 1 })
 mobDropdown.OnChanged:Connect(function(val)
-    if type(val) == "string" then selectedMob = val; if _G.UpdateLiveState then _G.UpdateLiveState() end end
+    if type(val) == "string" then selectedMob = val end
 end)
 
 local refreshMobBtn = mobTab:addButton({ text = "Refresh & Group Mobs" })
@@ -693,12 +581,10 @@ mobTab:addText({ text = " " })
 mobTab:addText({ text = "  [ PLAYER SELECTION ]  " })
 
 local initialPlayers = getPlayerNames()
-local playerDropdown = mobTab:addDropdown({ text = "Target Player", items = initialPlayers, defaultIndex = getIndex(initialPlayers, selectedPlayerTarget) })
+local playerDropdown = mobTab:addDropdown({ text = "Target Player", items = initialPlayers, defaultIndex = 1 })
 playerDropdown.OnChanged:Connect(function(val)
     if type(val) == "string" then
         selectedPlayerTarget = val
-        Config.TargetPlayer  = val
-        if _G.UpdateLiveState then _G.UpdateLiveState() end
     end
 end)
 
@@ -726,59 +612,49 @@ end)
 -- TAB: FARM SETUP
 -- ==========================================
 combatTab:addText({ text = "  [ AUTOFARM POSITION ]  " })
-combatTab:addText({ text = "⚠ Sliders do not visually update on config load." })
-combatTab:addText({ text = "Check 'Live Bot State' in Config tab for actuals." })
 
 local posOptions = {"Above","Below","Behind","Middle","Random","Up & down"}
-local posDrop = combatTab:addDropdown({ text = "Hit Position", items = posOptions, defaultIndex = getIndex(posOptions, Config.HitPosition :: string) })
+local posDrop = combatTab:addDropdown({ text = "Hit Position", items = posOptions, defaultIndex = 1 })
 posDrop.OnChanged:Connect(function(val)
-    hitPosition        = val
-    Config.HitPosition = val
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
+    hitPosition = val
 end)
 
-local distSlider = combatTab:addSlider({ text = "Offset Distance", min = 5, max = 20, mode = "number", default = Config.OffsetDistance })
+local distSlider = combatTab:addSlider({ text = "Offset Distance", min = 5, max = 20, mode = "number", default = 10 })
 distSlider.OnChanged:Connect(function(val)
-    OFFSET_DISTANCE       = val
-    Config.OffsetDistance = val
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
+    OFFSET_DISTANCE = val
 end)
 
-local randSpeedSlider = combatTab:addSlider({ text = "Switch Delay", min = 1, max = 10, mode = "number", default = Config.RandomSwitchSpeed })
+local randSpeedSlider = combatTab:addSlider({ text = "Switch Delay", min = 1, max = 10, mode = "number", default = 2 })
 randSpeedSlider.OnChanged:Connect(function(val)
-    RANDOM_SWITCH_SPEED      = val
-    Config.RandomSwitchSpeed = val
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
+    RANDOM_SWITCH_SPEED = val
 end)
 
 combatTab:addText({ text = " " })
 combatTab:addText({ text = "  [ CUSTOM KEYBINDS ]  " })
 
-local summonKeyDrop = combatTab:addDropdown({ text = "Stand Keybind", items = ALL_KEYS, defaultIndex = getIndex(ALL_KEYS, Config.SummonKeyStr :: string) })
+local summonKeyDrop = combatTab:addDropdown({ text = "Stand Keybind", items = ALL_KEYS, defaultIndex = getIndex(ALL_KEYS, "Q") })
 summonKeyDrop.OnChanged:Connect(function(val)
     if type(val) == "string" and KEY_MAP[val] then
-        SUMMON_KEY          = KEY_MAP[val]
-        Config.SummonKeyStr = val
-        if _G.UpdateLiveState then _G.UpdateLiveState() end
+        SUMMON_KEY    = KEY_MAP[val]
+        summonKeyStr  = val
     end
 end)
 
-local loadedAtkIndices: {number} = {}
-for _, savedKey in ipairs(Config.AttackKeyStrs :: {string}) do
-    table.insert(loadedAtkIndices, getIndex(ALL_KEYS, savedKey))
+local defaultAtkIndices: {number} = {}
+for _, k in ipairs({"E","R","Z","X","C","V"}) do
+    table.insert(defaultAtkIndices, getIndex(ALL_KEYS, k))
 end
 
-local attackKeysDrop = combatTab:addDropdown({ text = "Combat Keybinds", items = ALL_KEYS, defaultIndices = loadedAtkIndices })
+local attackKeysDrop = combatTab:addDropdown({ text = "Combat Keybinds", items = ALL_KEYS, defaultIndices = defaultAtkIndices })
 attackKeysDrop.OnChanged:Connect(function(_, values)
-    ATTACK_KEYS          = {}
-    Config.AttackKeyStrs = {}
+    ATTACK_KEYS     = {}
+    attackKeyStrs   = {}
     for _, letter in ipairs(values or {}) do
         if KEY_MAP[letter] then
             table.insert(ATTACK_KEYS, KEY_MAP[letter])
-            table.insert(Config.AttackKeyStrs :: {string}, letter)
+            table.insert(attackKeyStrs, letter)
         end
     end
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
 -- ==========================================
@@ -854,7 +730,9 @@ tpToPlayerBtn.OnClick:Connect(function()
         task.spawn(function()
             for _ = 1, 5 do
                 if not isSafe() then break end
-                root.CFrame = CFrame.new((targetPlr.Character :: Model).HumanoidRootPart.Position + Vector3.new(0, 3, 0))
+                root.CFrame = CFrame.new(
+                    (targetPlr.Character :: Model).HumanoidRootPart.Position + Vector3.new(0, 3, 0)
+                )
                 task.wait(0.05)
             end
             notify("Teleported to " .. targetPlr.Name .. "!")
@@ -865,182 +743,12 @@ tpToPlayerBtn.OnClick:Connect(function()
 end)
 
 -- ==========================================
--- TAB: CONFIG
--- ==========================================
-setTab:addText({ text = "  [ DATA MANAGER ]  " })
-
-local function getSlotsAndCount(): ({string}, number)
-    local slots: {string} = {}
-    local count = 0
-    for i = 1, SLOT_COUNT do
-        local base = "Config " .. i
-        local path = FOLDER_PATH .. "/" .. base .. ".txt"
-        if isfile and isfile(path) then
-            table.insert(slots, base .. "  (Saved)"); count += 1
-        else
-            table.insert(slots, base .. "  (Empty)")
-        end
-    end
-    return slots, count
-end
-
-local initSlots, initCount = getSlotsAndCount()
-local dropDefaultIdx = 1
-for i, v in ipairs(initSlots) do
-    if string.find(v, "^" .. currentSelectedSlot) then dropDefaultIdx = i end
-end
-
-local configDrop = setTab:addDropdown({ text = "Select Slot", items = initSlots, defaultIndex = dropDefaultIdx })
-configDrop.OnChanged:Connect(function(val)
-    local strVal = type(val) == "table" and val[1] or tostring(val)
-    local parsed = string.match(strVal, "^(Config %d+)")
-    if parsed then currentSelectedSlot = parsed end
-end)
-
-local configStatus = setTab:addText({ text = AutoLoadedName and ("Status: Auto-Loaded " .. AutoLoadedName) or "Status: Idle" })
-local configCount  = setTab:addText({ text = "Found " .. initCount .. " configs in folder." })
-
-local function refreshConfigUI()
-    local newSlots, newCount = getSlotsAndCount()
-    pcall(function()
-        if      configDrop.Refresh   then configDrop:Refresh(newSlots)
-        elseif  configDrop.update    then configDrop:update(newSlots)
-        elseif  configDrop.setItems  then configDrop:setItems(newSlots) end
-    end)
-    pcall(function() configCount:setText("Found " .. newCount .. " configs in folder.") end)
-end
-
--- Live state labels declared before _G.UpdateLiveState closure
-setTab:addText({ text = " " })
-setTab:addText({ text = "  [ LIVE BOT STATE ]  " })
-local liveState1 = setTab:addText({ text = "..." })
-local liveState2 = setTab:addText({ text = "..." })
-local liveState3 = setTab:addText({ text = "..." })
-local liveState4 = setTab:addText({ text = "..." })
-
-_G.UpdateLiveState = function()
-    local atkStr   = table.concat(Config.AttackKeyStrs :: {string}, ", ")
-    local wlCount  = #(Config.WhitelistedNames :: {string})
-    local cleanTgt = string.match(selectedMob, "^(.-) %(") or selectedMob
-
-    local s1 = string.format("Position: %s | Dist: %d | Delay: %ds", tostring(hitPosition), OFFSET_DISTANCE, RANDOM_SWITCH_SPEED)
-    local s2 = string.format("Stand: %s | Atk: [%s]", tostring(Config.SummonKeyStr), atkStr)
-    local s3 = string.format("Whitelist: %d | Target Mob: %s", wlCount, cleanTgt)
-    local s4 = string.format("Target Player: %s", tostring(selectedPlayerTarget))
-
-    pcall(function()
-        local function trySet(label: any, text: string)
-            if      label.setText then label:setText(text)
-            elseif  label.update  then label:update(text)
-            elseif  label.set     then label:set(text) end
-        end
-        trySet(liveState1, s1)
-        trySet(liveState2, s2)
-        trySet(liveState3, s3)
-        trySet(liveState4, s4)
-    end)
-end
-
-local saveBtn = setTab:addButton({ text = "Save to Selected Slot" })
-saveBtn.OnClick:Connect(function()
-    if not writefile then notify("Executor does not support file writing."); return end
-    if makefolder and not isfolder(FOLDER_PATH) then pcall(makefolder, FOLDER_PATH) end
-    local path = FOLDER_PATH .. "/" .. currentSelectedSlot .. ".txt"
-    local ok = pcall(function() writefile(path, SerializeConfig(Config)) end)
-    if ok then
-        pcall(function() configStatus:setText("Status: Saved " .. currentSelectedSlot) end)
-        notify("Saved " .. currentSelectedSlot .. "!")
-        refreshConfigUI()
-    else
-        pcall(function() configStatus:setText("Err: Save Failed") end)
-        notify("Save failed — check F9 console.")
-    end
-end)
-
-local deleteBtn = setTab:addButton({ text = "Delete Selected Config" })
-deleteBtn.OnClick:Connect(function()
-    local path = FOLDER_PATH .. "/" .. currentSelectedSlot .. ".txt"
-    if isfile and isfile(path) then
-        if delfile then
-            pcall(function() delfile(path) end)
-            notify("Deleted " .. currentSelectedSlot .. "!")
-            pcall(function() configStatus:setText("Status: Deleted " .. currentSelectedSlot) end)
-            refreshConfigUI()
-        else
-            notify("Executor does not support file deletion.")
-        end
-    else
-        notify(currentSelectedSlot .. " is already empty!")
-    end
-end)
-
-local loadBtn = setTab:addButton({ text = "Load Selected Slot" })
-loadBtn.OnClick:Connect(function()
-    local path = FOLDER_PATH .. "/" .. currentSelectedSlot .. ".txt"
-    if not (isfile and isfile(path) and readfile) then
-        pcall(function() configStatus:setText("Status: Slot is Empty") end)
-        notify(currentSelectedSlot .. " is empty — nothing to load.")
-        return
-    end
-    local ok, result = pcall(function() return DeserializeConfig(readfile(path)) end)
-    if not (ok and type(result) == "table") then
-        pcall(function() configStatus:setText("Err: File Corrupted") end)
-        notify("Config file is corrupted.")
-        return
-    end
-
-    for k, v in pairs(result) do Config[k] = v end
-    if not Config.RandomSwitchSpeed then Config.RandomSwitchSpeed = 2 end
-    if not Config.WhitelistedNames   then Config.WhitelistedNames  = {} end
-    if not Config.TargetPlayer        then Config.TargetPlayer       = "None" end
-
-    hitPosition          = Config.HitPosition
-    OFFSET_DISTANCE      = Config.OffsetDistance
-    RANDOM_SWITCH_SPEED  = Config.RandomSwitchSpeed
-    SUMMON_KEY           = KEY_MAP[Config.SummonKeyStr :: string] or 0x51
-    selectedPlayerTarget = Config.TargetPlayer :: string
-
-    ATTACK_KEYS = {}
-    for _, s in ipairs(Config.AttackKeyStrs :: {string}) do
-        if KEY_MAP[s] then table.insert(ATTACK_KEYS, KEY_MAP[s]) end
-    end
-
-    UpdateUIElement(posDrop,         Config.HitPosition)
-    UpdateUIElement(distSlider,      Config.OffsetDistance)
-    UpdateUIElement(randSpeedSlider, Config.RandomSwitchSpeed)
-    UpdateUIElement(summonKeyDrop,   Config.SummonKeyStr)
-    UpdateUIElement(attackKeysDrop,  Config.AttackKeyStrs)
-    UpdateUIElement(whitelistDrop,   Config.WhitelistedNames)
-    UpdateUIElement(playerDropdown,  Config.TargetPlayer)
-
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
-    pcall(function() configStatus:setText("Status: Loaded " .. currentSelectedSlot) end)
-    notify("Loaded " .. currentSelectedSlot .. " successfully!")
-end)
-
-local refreshCfgBtn = setTab:addButton({ text = "Refresh Config Folder" })
-refreshCfgBtn.OnClick:Connect(function()
-    refreshConfigUI()
-    notify("Config list refreshed!")
-end)
-
-if _G.UpdateLiveState then _G.UpdateLiveState() end
-
-if AutoLoadedName then
-    task.spawn(function()
-        task.wait(1)
-        notify(AutoLoadedName .. " auto-loaded on launch!")
-    end)
-end
-
--- ==========================================
 -- MODULE 1: RANDOMIZED KILL LOOP
 -- ==========================================
 task.spawn(function()
     local rMode   = { value = "Above" }
     local rChange = { value = 0 }
 
-    -- Dedicated M1 hold thread
     task.spawn(function()
         local holding = false
         while true do
@@ -1089,7 +797,6 @@ task.spawn(function()
 
         root.CFrame = calculateCFrame(closest, rMode, rChange)
 
-        -- Abilities fire independently of M1
         if not isAttackingLobby then
             isAttackingLobby = true
             task.spawn(function()
@@ -1112,7 +819,6 @@ task.spawn(function()
     local rMode   = { value = "Above" }
     local rChange = { value = 0 }
 
-    -- Dedicated M1 hold thread
     task.spawn(function()
         local holding = false
         while true do
@@ -1192,8 +898,9 @@ end)
 local function findConjTarget(): {hrp: BasePart, hum: Humanoid}?
     local lf   = workspace:FindFirstChild("Live")
     local char = player.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-    if not lf or not root or root.Position.Y < CONJ_Y_MIN then return nil end
+    if not lf or not char then return nil end
+    local root = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+    if not root or root.Position.Y < CONJ_Y_MIN then return nil end
 
     local closest: {hrp: BasePart, hum: Humanoid}? = nil
     local minDist = 500
@@ -1211,7 +918,10 @@ local function findConjTarget(): {hrp: BasePart, hum: Humanoid}?
         local hrp = (v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")) :: BasePart?
         if hrp and mh and mh.Health > 0 and hrp.Position.Y > CONJ_Y_MIN then
             local d = getDistance(myPos, hrp.Position)
-            if d < minDist then minDist = d; closest = { hrp = hrp, hum = mh } end
+            if d < minDist then
+                minDist  = d
+                closest  = { hrp = hrp, hum = mh }
+            end
         end
     end
     return closest
@@ -1221,16 +931,16 @@ task.spawn(function()
     local rMode   = { value = "Above" }
     local rChange = { value = 0 }
 
-    -- Dedicated M1 hold thread for conjuration combat phase
+    -- M1 hold only during active combat phase
     task.spawn(function()
         local holding = false
         while true do
             task.wait(0.01)
-            local shouldHold = isConjFarmOn and isSafe() and (findConjTarget() ~= nil)
-            if shouldHold and not holding then
+            local inCombat = isConjFarmOn and isSafe() and (findConjTarget() ~= nil)
+            if inCombat and not holding then
                 if mouse1press then mouse1press() end
                 holding = true
-            elseif not shouldHold and holding then
+            elseif not inCombat and holding then
                 if mouse1release then mouse1release() end
                 holding = false
             end
@@ -1239,113 +949,143 @@ task.spawn(function()
 
     while true do
         task.wait(0.5)
-        if not isConjFarmOn or not isSafe() then continue end
 
-        -- PHASE 1: YOGA MAT
+        if not isConjFarmOn or not isSafe() then
+            task.wait(0.5)
+            continue
+        end
+
+        -- PHASE 1: YOGA MAT (only if no combat target found)
         if not findConjTarget() then
-            local mapObj  = workspace:FindFirstChild("Map")
-            local medit   = mapObj and mapObj:FindFirstChild("Meditation")
-            local yogaMat = medit and medit:FindFirstChild("Yoga Mat") :: BasePart?
+            local ok1, mapObj  = pcall(function() return workspace:FindFirstChild("Map") end)
+            local medit        = ok1 and mapObj and mapObj:FindFirstChild("Meditation")
+            local yogaMat      = medit and medit:FindFirstChild("Yoga Mat") :: BasePart?
 
             if yogaMat and isConjFarmOn and isSafe() then
                 local teleported = false
+                local loopGuard  = 0
+
                 while not teleported and isConjFarmOn and isSafe() do
+                    loopGuard += 1
+                    if loopGuard > 20 then break end -- hard cap: avoid infinite loop
                     if not yogaMat.Parent then break end
 
-                    local tpTimeout = tick()
+                    -- Teleport to mat
+                    local tpStart = tick()
                     while isConjFarmOn and isSafe() do
-                        local r = player.Character.HumanoidRootPart :: BasePart
+                        local r = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                        if not r then break end
                         if getDistance(r.Position, yogaMat.Position) < 10 then break end
                         r.CFrame = CFrame.new(yogaMat.Position + Vector3.new(0, 3, 0))
                         task.wait(0.1)
-                        if tick() - tpTimeout > 10 then break end
+                        if tick() - tpStart > 10 then break end
                     end
+
                     if not isSafe() then break end
                     task.wait(0.5)
 
-                    local startPos = (player.Character.HumanoidRootPart :: BasePart).Position
+                    local charNow = player.Character
+                    if not charNow then break end
+                    local startPos = (charNow:FindFirstChild("HumanoidRootPart") :: BasePart).Position
+
+                    -- Nudge to register proximity
                     keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                     task.wait(0.05)
                     keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
                     task.wait(0.2)
 
+                    -- Camera lock
                     local camActive = true
                     task.spawn(function()
                         while camActive and isConjFarmOn and isSafe() do
-                            task.wait()
-                            local cam  = workspace.CurrentCamera
+                            task.wait(0.05)
+                            local ok2, cam = pcall(function() return workspace.CurrentCamera end)
                             local head = player.Character and player.Character:FindFirstChild("Head") :: BasePart?
-                            if cam and head and yogaMat and yogaMat.Parent then
+                            if ok2 and cam and head and yogaMat and yogaMat.Parent then
                                 cam.CFrame = CFrame.lookAt(head.Position + Vector3.new(0, 2, 5), yogaMat.Position)
                             end
                         end
                     end)
 
-                    local startTime = tick()
-                    keypress(E_KEY); task.wait(0.1); keyrelease(E_KEY); task.wait(0.1)
+                    -- Interact
+                    local interactStart = tick()
+                    keypress(E_KEY); task.wait(0.1); keyrelease(E_KEY)
+                    task.wait(0.1)
                     keypress(E_KEY)
 
-                    while tick() - startTime < 25 and isConjFarmOn and isSafe() do
+                    while tick() - interactStart < 25 and isConjFarmOn and isSafe() do
                         task.wait(0.1)
-                        local curHrp = player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                        local curChar = player.Character
+                        local curHrp  = curChar and curChar:FindFirstChild("HumanoidRootPart") :: BasePart?
                         if curHrp and getDistance(curHrp.Position, startPos) >= CONJ_ARENA_DIST then
-                            teleported = true; break
+                            teleported = true
+                            break
                         end
                     end
 
-                    keyrelease(E_KEY)
+                    pcall(keyrelease, E_KEY)
                     camActive = false
-                    if not teleported then task.wait(0.2) end
+                    if not teleported then task.wait(0.5) end
                 end
-                task.wait(0.5)
             end
 
             if not isConjFarmOn or not isSafe() then continue end
 
-            -- PHASE 2: THE SELF
-            local npcs    = workspace:FindFirstChild("Npcs")
-            local theSelf = npcs and npcs:FindFirstChild("The Self")
-            local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart") :: BasePart?
+            -- PHASE 2: THE SELF NPC
+            local ok3, npcs = pcall(function() return workspace:FindFirstChild("Npcs") end)
+            local theSelf   = ok3 and npcs and npcs:FindFirstChild("The Self")
+            local selfHrp   = theSelf and theSelf:FindFirstChild("HumanoidRootPart") :: BasePart?
 
             if selfHrp and isConjFarmOn and isSafe() then
-                local inArena = false
+                local inArena  = false
+                local loopGuard2 = 0
+
                 while not inArena and isConjFarmOn and isSafe() do
+                    loopGuard2 += 1
+                    if loopGuard2 > 20 then break end
                     if not selfHrp.Parent then break end
 
                     local targetCF  = selfHrp.CFrame * CFrame.new(0, 0, -3)
-                    local tpTimeout = tick()
+                    local tpStart2  = tick()
+
                     while isConjFarmOn and isSafe() do
-                        local r = player.Character.HumanoidRootPart :: BasePart
+                        local r = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                        if not r then break end
                         if getDistance(r.Position, targetCF.Position) < 10 then break end
                         r.CFrame = CFrame.lookAt(targetCF.Position, selfHrp.Position)
                         task.wait(0.1)
-                        if tick() - tpTimeout > 10 then break end
+                        if tick() - tpStart2 > 10 then break end
                     end
+
                     if not isSafe() then break end
                     task.wait(0.5)
 
-                    local startPos  = (player.Character.HumanoidRootPart :: BasePart).Position
+                    local charNow2 = player.Character
+                    if not charNow2 then break end
+                    local startPos2 = (charNow2:FindFirstChild("HumanoidRootPart") :: BasePart).Position
+
                     keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                     task.wait(0.05)
                     keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
                     task.wait(0.2)
 
-                    local startTime = tick()
+                    local interactStart2 = tick()
                     keypress(E_KEY)
                     task.wait(1.5)
 
                     while isConjFarmOn and isSafe() do
                         task.wait(0.05)
                         keypress(ONE_KEY); task.wait(0.01); keyrelease(ONE_KEY)
-                        local curHrp = player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-                        if (curHrp and getDistance(curHrp.Position, startPos) >= CONJ_ARENA_DIST) or findConjTarget() then
+                        local curHrp2 = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                        if curHrp2 and getDistance(curHrp2.Position, startPos2) >= CONJ_ARENA_DIST then
                             inArena = true; break
                         end
-                        if tick() - startTime > 25 then break end
+                        if findConjTarget() then inArena = true; break end
+                        if tick() - interactStart2 > 25 then break end
                     end
 
-                    keyrelease(E_KEY)
-                    keyrelease(ONE_KEY)
+                    pcall(keyrelease, E_KEY)
+                    pcall(keyrelease, ONE_KEY)
                     if not inArena then task.wait(0.5) end
                 end
             end
@@ -1356,33 +1096,49 @@ task.spawn(function()
         -- PHASE 3: COMBAT
         local target: {hrp: BasePart, hum: Humanoid}? = nil
         local waitStart = tick()
+
         while not target and isConjFarmOn and isSafe() do
             target = findConjTarget()
+            if target then break end
             task.wait(0.1)
             if tick() - waitStart > CONJ_MAX_WAIT then break end
         end
 
+        if not target then continue end
+
         local conjLastSummon = 0
 
-        while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn and isSafe() do
-            task.wait(0.05)
-            local char = player.Character :: Model
-            local root = char.HumanoidRootPart :: BasePart
+        while isConjFarmOn and isSafe() do
+            -- Validate target still alive
+            local ok4 = pcall(function()
+                if not target or not target.hum or not target.hum.Parent then
+                    error("dead")
+                end
+                if target.hum.Health <= 0 then error("dead") end
+            end)
+            if not ok4 then break end
 
-            if not isStandOut(char) and tick() - conjLastSummon > 3 then
+            task.wait(0.05)
+
+            local combatChar = player.Character :: Model?
+            if not combatChar then break end
+            local combatRoot = combatChar:FindFirstChild("HumanoidRootPart") :: BasePart?
+            if not combatRoot then break end
+
+            if not isStandOut(combatChar) and tick() - conjLastSummon > 3 then
                 keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY)
                 conjLastSummon = tick()
             end
 
             if target.hrp and target.hrp.Parent then
-                root.CFrame = calculateCFrame(target.hrp, rMode, rChange)
+                combatRoot.CFrame = calculateCFrame(target.hrp, rMode, rChange)
             end
 
             if not isAttackingConj then
                 isAttackingConj = true
                 task.spawn(function()
                     for _, k in ipairs(ATTACK_KEYS) do
-                        if not isSafe() then break end
+                        if not isSafe() or not isConjFarmOn then break end
                         keypress(k); task.wait(0.01); keyrelease(k)
                     end
                     isAttackingConj = false
@@ -1390,18 +1146,17 @@ task.spawn(function()
             end
         end
 
-        -- PHASE 4: WAIT FOR RETURN
+        -- PHASE 4: WAIT TO RETURN TO GROUND
         if isConjFarmOn and isSafe() then
             local returnTimer = tick()
             repeat
                 task.wait(0.5)
-                local curChar = player.Character
-                local curHrp  = curChar and curChar:FindFirstChild("HumanoidRootPart") :: BasePart?
-            until not isConjFarmOn
-                or not isSafe()
-                or not curHrp
-                or (curHrp :: BasePart).Position.Y < CONJ_Y_MIN
-                or tick() - returnTimer > CONJ_MAX_WAIT
+                local retChar = player.Character
+                local retHrp  = retChar and retChar:FindFirstChild("HumanoidRootPart") :: BasePart?
+                if not retHrp then break end
+                if retHrp.Position.Y < CONJ_Y_MIN then break end
+                if tick() - returnTimer > CONJ_MAX_WAIT then break end
+            until not isConjFarmOn or not isSafe()
             task.wait(1)
         end
     end
