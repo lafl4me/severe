@@ -108,7 +108,7 @@ local function isSafe(): boolean
 end
 
 -- ==========================================
--- INIT CONFIG FROM _G.Settings
+-- INIT CONFIG
 -- ==========================================
 local rawSummonStr  = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q"
 local rawAttackStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E","R","Z","X","C","V"}
@@ -309,7 +309,8 @@ if isHeadless then
                 if mh and mh.Health > 0 and hrp.Position.Y >= MIN_Y_LEVEL then
                     local d = getDistance(myPos, hrp.Position)
                     if d < minDist and d < MAX_DISTANCE then
-                        minDist = d; closest = hrp
+                        minDist = d
+                        closest = hrp
                     end
                 end
             end
@@ -475,12 +476,26 @@ local function calculateCFrame(
     end
 end
 
+-- Shared teleport helper: moves root to targetPos repeatedly until within
+-- tolerance or timeout expires. Returns true if reached.
+local function tpTo(targetPos: Vector3, tolerance: number, timeout: number): boolean
+    local start = tick()
+    while isConjFarmOn and isSafe() do
+        local r = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+        if not r then return false end
+        if getDistance(r.Position, targetPos) < tolerance then return true end
+        r.CFrame = CFrame.new(targetPos)
+        task.wait(0.15)
+        if tick() - start > timeout then return false end
+    end
+    return false
+end
+
 -- ==========================================
 -- UI INIT
--- Fix: compile source to bytecode before luau.load
 -- ==========================================
-local uiSource = game:HttpGet("https://github.com/misterzeee/SevereUiLib/raw/refs/heads/main/MainByteCode.lua")
-local uiFunc   = loadstring(uiSource)
+local bytecode = game:HttpGet("https://github.com/misterzeee/SevereUiLib/raw/refs/heads/main/MainByteCode.lua")
+local uiFunc   = luau.load(bytecode)
 uiFunc()
 local UI = (getfenv and getfenv(uiFunc) and getfenv(uiFunc).zeeUi) or _G.zeeUi
 if not UI then UI = (zeeUi :: any) end
@@ -936,32 +951,20 @@ local function findConjTarget(): {hrp: BasePart, hum: Humanoid}?
     return result
 end
 
-local function tpTo(targetPos: Vector3, tolerance: number, timeout: number): boolean
-    local start = tick()
-    while isConjFarmOn and isSafe() do
-        local r = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-        if not r then return false end
-        if getDistance(r.Position, targetPos) < tolerance then return true end
-        r.CFrame = CFrame.new(targetPos)
-        task.wait(0.15)
-        if tick() - start > timeout then return false end
-    end
-    return false
-end
-
 task.spawn(function()
     local rMode   = { value = "Above" }
     local rChange = { value = 0 }
 
+    -- M1 hold: only fires during active combat (target present)
     task.spawn(function()
         local holding = false
         while true do
             task.wait(0.01)
-            local hasTarget = isConjFarmOn and isSafe() and (findConjTarget() ~= nil)
-            if hasTarget and not holding then
+            local shouldHold = isConjFarmOn and isSafe() and (findConjTarget() ~= nil)
+            if shouldHold and not holding then
                 if mouse1press then mouse1press() end
                 holding = true
-            elseif not hasTarget and holding then
+            elseif not shouldHold and holding then
                 if mouse1release then mouse1release() end
                 holding = false
             end
@@ -972,13 +975,15 @@ task.spawn(function()
         task.wait(1)
         if not isConjFarmOn or not isSafe() then continue end
 
-        -- If already in arena skip all navigation
-        local skipNav = findConjTarget() ~= nil
+        -- Already in arena — skip navigation
+        if findConjTarget() then
+            goto combat
+        end
 
-        if not skipNav then
-            -- ----------------------------------------
-            -- PHASE 1: YOGA MAT
-            -- ----------------------------------------
+        -- ----------------------------------------
+        -- PHASE 1: YOGA MAT
+        -- ----------------------------------------
+        do
             local yogaMat: BasePart? = nil
             pcall(function()
                 local mapObj = workspace:FindFirstChild("Map")
@@ -988,6 +993,7 @@ task.spawn(function()
 
             if not yogaMat or not yogaMat.Parent then
                 notify("Conj: Yoga Mat not found, retrying...")
+                task.wait(2)
                 continue
             end
 
@@ -1037,15 +1043,21 @@ task.spawn(function()
 
             if not teleported then
                 task.wait(0.5)
-                continue
+                continue -- retry from top
             end
 
             task.wait(0.5)
-            if not isConjFarmOn or not isSafe() then continue end
+        end
 
-            -- ----------------------------------------
-            -- PHASE 2: THE SELF NPC
-            -- ----------------------------------------
+        if not isConjFarmOn or not isSafe() then continue end
+
+        -- ----------------------------------------
+        -- PHASE 2: THE SELF NPC
+        -- Only entered if we teleported but target
+        -- hasn't spawned yet. If NPC missing we
+        -- fall straight through to combat wait.
+        -- ----------------------------------------
+        do
             local selfHrp: BasePart? = nil
             pcall(function()
                 local npcs    = workspace:FindFirstChild("Npcs")
@@ -1053,123 +1065,130 @@ task.spawn(function()
                 selfHrp       = theSelf and theSelf:FindFirstChild("HumanoidRootPart") :: BasePart?
             end)
 
-            -- NPC missing: wait briefly for target to spawn, then fall through to combat
             if not selfHrp or not selfHrp.Parent then
-                notify("Conj: The Self not found, checking for arena target...")
-                local waited = tick()
-                while tick() - waited < 5 and isConjFarmOn and isSafe() do
-                    task.wait(0.5)
-                    if findConjTarget() then break end
-                end
-                -- fall through to combat block below
-            else
-                local frontPos = (selfHrp.CFrame * CFrame.new(0, 0, -3)).Position
-                local reached2 = tpTo(frontPos, 10, 10)
-                if not reached2 or not isConjFarmOn or not isSafe() then continue end
-                task.wait(0.4)
-
-                pcall(function()
-                    keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
-                    task.wait(0.05)
-                    keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
-                end)
-                task.wait(0.2)
-
-                local startPos2  = (player.Character.HumanoidRootPart :: BasePart).Position
-                local startTime2 = tick()
-
-                keypress(E_KEY)
-                task.wait(1.5)
-
-                local inArena = false
-                while isConjFarmOn and isSafe() and tick() - startTime2 < 15 do
-                    task.wait(0.05)
-                    pcall(function() keypress(ONE_KEY); task.wait(0.01); keyrelease(ONE_KEY) end)
-                    local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-                    if (curHrp and getDistance(curHrp.Position, startPos2) >= CONJ_ARENA_DIST) or findConjTarget() then
-                        inArena = true; break
-                    end
-                end
-
-                keyrelease(E_KEY)
-                keyrelease(ONE_KEY)
-
-                if not inArena then
-                    task.wait(0.5)
-                    continue
-                end
-
-                task.wait(0.5)
+                -- NPC absent — combat may have already spawned, fall through
+                goto combat
             end
-        end
 
-        if not isConjFarmOn or not isSafe() then continue end
+            local frontPos = (selfHrp.CFrame * CFrame.new(0, 0, -3)).Position
+            local reached  = tpTo(frontPos, 10, 10)
+            if not reached or not isConjFarmOn or not isSafe() then continue end
+            task.wait(0.4)
+
+            pcall(function()
+                keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
+                task.wait(0.05)
+                keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
+            end)
+            task.wait(0.2)
+
+            local startPos  = (player.Character.HumanoidRootPart :: BasePart).Position
+            local startTime = tick()
+
+            keypress(E_KEY)
+            task.wait(1.5)
+
+            local inArena = false
+            while isConjFarmOn and isSafe() and tick() - startTime < 15 do
+                task.wait(0.05)
+                pcall(function() keypress(ONE_KEY); task.wait(0.01); keyrelease(ONE_KEY) end)
+                -- Check for movement into arena OR combat target spawn
+                local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                if (curHrp and getDistance(curHrp.Position, startPos) >= CONJ_ARENA_DIST) or findConjTarget() then
+                    inArena = true; break
+                end
+            end
+
+            keyrelease(E_KEY)
+            keyrelease(ONE_KEY)
+
+            if not inArena then
+                -- Interaction timed out — retry whole cycle
+                task.wait(0.5)
+                continue
+            end
+
+            task.wait(0.5)
+        end
 
         -- ----------------------------------------
         -- PHASE 3: COMBAT
         -- ----------------------------------------
-        local target: {hrp: BasePart, hum: Humanoid}? = nil
-        local waitStart = tick()
-        while not target and isConjFarmOn and isSafe() do
-            target = findConjTarget()
-            if target then break end
-            task.wait(0.2)
-            if tick() - waitStart > CONJ_MAX_WAIT then break end
-        end
+        ::combat::
+        do
+            if not isConjFarmOn or not isSafe() then continue end
 
-        if not target then continue end
-
-        notify("Conj: Target found, fighting!")
-
-        local conjLastSummon = 0
-
-        while isConjFarmOn and isSafe() do
-            task.wait(0.05)
-
-            local alive = false
-            pcall(function()
-                alive = target.hum ~= nil and target.hum.Parent ~= nil and target.hum.Health > 0
-            end)
-            if not alive then break end
-
-            local char = player.Character :: Model
-            local root = char:FindFirstChild("HumanoidRootPart") :: BasePart
-
-            if not isStandOut(char) and tick() - conjLastSummon > 3 then
-                keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY)
-                conjLastSummon = tick()
+            -- Wait up to CONJ_MAX_WAIT for target
+            local target: {hrp: BasePart, hum: Humanoid}? = nil
+            local waitStart = tick()
+            while not target and isConjFarmOn and isSafe() do
+                target = findConjTarget()
+                if target then break end
+                task.wait(0.2)
+                if tick() - waitStart > CONJ_MAX_WAIT then break end
             end
 
-            pcall(function()
-                if target.hrp and target.hrp.Parent then
-                    root.CFrame = calculateCFrame(target.hrp, rMode, rChange)
-                end
-            end)
+            if not target then
+                -- No target appeared — restart navigation cycle
+                continue
+            end
 
-            if not isAttackingConj then
-                isAttackingConj = true
-                task.spawn(function()
-                    for _, k in ipairs(ATTACK_KEYS) do
-                        if not isSafe() then break end
-                        keypress(k); task.wait(0.01); keyrelease(k)
-                    end
-                    isAttackingConj = false
+            notify("Conj: Target found, fighting!")
+
+            local conjLastSummon = 0
+
+            while isConjFarmOn and isSafe() do
+                task.wait(0.05)
+
+                local alive = false
+                pcall(function()
+                    alive = target.hum ~= nil
+                        and target.hum.Parent ~= nil
+                        and target.hum.Health > 0
                 end)
+                if not alive then break end
+
+                local char = player.Character :: Model
+                local root = char:FindFirstChild("HumanoidRootPart") :: BasePart
+
+                if not isStandOut(char) and tick() - conjLastSummon > 3 then
+                    keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY)
+                    conjLastSummon = tick()
+                end
+
+                pcall(function()
+                    if target.hrp and target.hrp.Parent then
+                        root.CFrame = calculateCFrame(target.hrp, rMode, rChange)
+                    end
+                end)
+
+                if not isAttackingConj then
+                    isAttackingConj = true
+                    task.spawn(function()
+                        for _, k in ipairs(ATTACK_KEYS) do
+                            if not isSafe() then break end
+                            keypress(k); task.wait(0.01); keyrelease(k)
+                        end
+                        isAttackingConj = false
+                    end)
+                end
             end
+
+            notify("Conj: Target defeated, waiting for return...")
         end
 
-        notify("Conj: Target defeated, returning...")
-
         -- ----------------------------------------
-        -- PHASE 4: WAIT FOR OVERWORLD RETURN
+        -- PHASE 4: WAIT TO RETURN TO OVERWORLD
         -- ----------------------------------------
-        local returnTimer = tick()
-        while isConjFarmOn and tick() - returnTimer < CONJ_MAX_WAIT do
-            task.wait(0.5)
-            local curChar = player.Character
-            local curHrp  = curChar and curChar:FindFirstChild("HumanoidRootPart") :: BasePart?
-            if not curHrp or curHrp.Position.Y < CONJ_Y_MIN then break end
+        do
+            local returnTimer = tick()
+            while isConjFarmOn and tick() - returnTimer < CONJ_MAX_WAIT do
+                task.wait(0.5)
+                local curChar = player.Character
+                local curHrp  = curChar and curChar:FindFirstChild("HumanoidRootPart") :: BasePart?
+                if not curHrp or curHrp.Position.Y < CONJ_Y_MIN then break end
+            end
+            task.wait(1)
         end
-        task.wait(1)
     end
 end)
