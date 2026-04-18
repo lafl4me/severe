@@ -123,9 +123,7 @@ if isHeadless then
                 mousemoveabs(absX + MathRandom(-3, 3), absY + MathRandom(-3, 3))
             end
             task.wait(0.05 + (MathRandom() * 0.05))
-            if mouse1click then 
-                mouse1click() 
-            elseif mouse1press and mouse1release then
+            if mouse1press and mouse1release then
                 mouse1press()
                 task.wait(0.05) 
                 mouse1release() 
@@ -251,21 +249,28 @@ if isHeadless then
                     elseif mode == "Middle" then root.CFrame = CFrame.lookAt(pos + (look * 2.5), pos)
                     else root.CFrame = CFrame.lookAt(pos + VectorCreate(0, OFFSET_DISTANCE, 0), pos) end
 
+                    local cam = Workspace.CurrentCamera
+                    if cam then
+                        cam.CFrame = CFrame.lookAt(cam.CFrame.Position, closestTarget.Position)
+                    end
+
                     if not isAttacking then
                         isAttacking = true
                         task.spawn(function()
-                            if mouse1click then
-                                mouse1click()
-                            elseif mouse1press and mouse1release then
-                                mouse1press()
-                                task.wait(0.05) 
-                                mouse1release()
-                            end
-                            if keypress and keyrelease then
-                                for _, k in ATTACK_KEYS do
-                                    keypress(k)
-                                    task.wait(0.05)
-                                    keyrelease(k)
+                            if isrbxactive and not isrbxactive() then
+                                -- Do nothing if Roblox is not active, hardware inputs will fail
+                            else
+                                if mouse1press and mouse1release then
+                                    mouse1press()
+                                    task.wait(0.05) 
+                                    mouse1release()
+                                end
+                                if keypress and keyrelease then
+                                    for _, k in ATTACK_KEYS do
+                                        keypress(k)
+                                        task.wait(0.05)
+                                        keyrelease(k)
+                                    end
                                 end
                             end
                             task.wait(0.1) 
@@ -1149,21 +1154,30 @@ task.spawn(function()
 
             if closestTarget then
                 root.CFrame = calculateTargetCFrame(closestTarget)
+                
+                -- Ensure camera points at target so M1 Hitboxes connect
+                local cam = Workspace.CurrentCamera
+                if cam then
+                    cam.CFrame = CFrame.lookAt(cam.CFrame.Position, closestTarget.Position)
+                end
+                
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
-                        if mouse1click then
-                            mouse1click()
-                        elseif mouse1press and mouse1release then
-                            mouse1press()
-                            task.wait(0.05)
-                            mouse1release()
-                        end
-                        if keypress and keyrelease then
-                            for _, k in ATTACK_KEYS do
-                                keypress(k)
+                        if isrbxactive and not isrbxactive() then
+                            -- Ignore hardware simulation if window is unfocused
+                        else
+                            if mouse1press and mouse1release then
+                                mouse1press()
                                 task.wait(0.05)
-                                keyrelease(k)
+                                mouse1release()
+                            end
+                            if keypress and keyrelease then
+                                for _, k in ATTACK_KEYS do
+                                    keypress(k)
+                                    task.wait(0.05)
+                                    keyrelease(k)
+                                end
                             end
                         end
                         task.wait(0.1)
@@ -1239,21 +1253,30 @@ task.spawn(function()
 
             if closestTarget then
                 root.CFrame = calculateTargetCFrame(closestTarget)
+                
+                -- Ensure camera points at target so M1 Hitboxes connect
+                local cam = Workspace.CurrentCamera
+                if cam then
+                    cam.CFrame = CFrame.lookAt(cam.CFrame.Position, closestTarget.Position)
+                end
+                
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
-                        if mouse1click then
-                            mouse1click()
-                        elseif mouse1press and mouse1release then
-                            mouse1press()
-                            task.wait(0.05)
-                            mouse1release()
-                        end
-                        if keypress and keyrelease then
-                            for _, k in ATTACK_KEYS do
-                                keypress(k)
+                        if isrbxactive and not isrbxactive() then
+                            -- Ignore hardware simulation if window is unfocused
+                        else
+                            if mouse1press and mouse1release then
+                                mouse1press()
                                 task.wait(0.05)
-                                keyrelease(k)
+                                mouse1release()
+                            end
+                            if keypress and keyrelease then
+                                for _, k in ATTACK_KEYS do
+                                    keypress(k)
+                                    task.wait(0.05)
+                                    keyrelease(k)
+                                end
                             end
                         end
                         task.wait(0.1)
@@ -1488,22 +1511,30 @@ task.spawn(function()
             end
 
             r.CFrame = calculateTargetCFrame(target.hrp)
+            
+            -- Ensure camera points at target so M1 Hitboxes connect
+            local cam = Workspace.CurrentCamera
+            if cam then
+                cam.CFrame = CFrame.lookAt(cam.CFrame.Position, target.hrp.Position)
+            end
 
             if not attacking then
                 attacking = true
                 task.spawn(function()
-                    if mouse1click then
-                        mouse1click()
-                    elseif mouse1press and mouse1release then
-                        mouse1press()
-                        task.wait(0.05)
-                        mouse1release()
-                    end
-                    if keypress and keyrelease then
-                        for _, k in ATTACK_KEYS do
-                            keypress(k)
+                    if isrbxactive and not isrbxactive() then
+                        -- Ignore hardware simulation if window is unfocused
+                    else
+                        if mouse1press and mouse1release then
+                            mouse1press()
                             task.wait(0.05)
-                            keyrelease(k)
+                            mouse1release()
+                        end
+                        if keypress and keyrelease then
+                            for _, k in ATTACK_KEYS do
+                                keypress(k)
+                                task.wait(0.05)
+                                keyrelease(k)
+                            end
                         end
                     end
                     task.wait(0.1) 
