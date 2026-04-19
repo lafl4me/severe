@@ -24,9 +24,7 @@ local VectorMagnitude = vector.magnitude
 local player = Players.LocalPlayer
 
 local function notify(text: string)
-    if send_notification then
-        send_notification(text, "Info")
-    end
+    send_notification(text)
 end
 
 -- ==========================================
@@ -43,12 +41,30 @@ local function trim(s: string?): string
     return if s then StringMatch(s, "^%s*(.-)%s*$") or "" else ""
 end
 
-local function cleanKey(key: any): string
+local function cleanKey(key): string
     if not key then return "Q" end
     local upperKey = StringUpper(tostring(key))
   
     if upperKey == "TAB" then return "Tab" end
     return upperKey
+end
+
+-- ==========================================
+-- IMPROVED INPUT SIMULATION (EXTERNAL FIX)
+-- ==========================================
+local function performAttack(attackKeys)
+    if mouse1press then
+        mouse1press()
+        task.wait(0.03 + (MathRandom() * 0.02))
+        if mouse1release then mouse1release() end
+    end
+    if keypress then
+        for _, k in attackKeys do
+            keypress(k)
+            task.wait(0.02 + (MathRandom() * 0.01))
+            if keyrelease then keyrelease(k) end
+        end
+    end
 end
 
 -- ==============================================================================
@@ -91,17 +107,17 @@ if isHeadless then
     local MIN_Y_LEVEL = -150
     local MAX_DISTANCE = 2500
 
-    local function isStandOut(c: Model)
+    local function isStandOut(c)
         if not c then return false end
         local a = c:GetAttribute("SummonedStand")
         return (a and a ~= "" and a ~= false)
     end
 
     local function forceSummon()
-        if keypress and keyrelease then
+        if keypress then
             keypress(SUMMON_KEY)
             task.wait(0.1 + (MathRandom() * 0.05))
-            keyrelease(SUMMON_KEY)
+            if keyrelease then keyrelease(SUMMON_KEY) end
         end
         lastSummonTime = OsClock()
     end
@@ -113,7 +129,7 @@ if isHeadless then
         local RETRY_SCALE_Y = 0.6950
         local TOPBAR_OFFSET = 36
 
-        local function clickAtScale(scaleX: number, scaleY: number)
+        local function clickAtScale(scaleX, scaleY)
             local camera = Workspace.CurrentCamera
             if not camera then return end
             local viewport = camera.ViewportSize
@@ -123,10 +139,12 @@ if isHeadless then
                 mousemoveabs(absX + MathRandom(-3, 3), absY + MathRandom(-3, 3))
             end
             task.wait(0.05 + (MathRandom() * 0.05))
-            if mouse1press and mouse1release then
-                mouse1press()
-                task.wait(0.05) 
-                mouse1release() 
+            if mouse1click then mouse1click() else
+                if mouse1press then 
+                    mouse1press()
+                    task.wait(0.03 + MathRandom()*0.03)
+                    if mouse1release then mouse1release() end 
+                end
             end
         end
 
@@ -181,7 +199,7 @@ if isHeadless then
             task.wait(0.05)
             local c = player.Character
             if not c then continue end
-            local root = c:FindFirstChild("HumanoidRootPart") :: BasePart
+            local root = c:FindFirstChild("HumanoidRootPart")
             local hum = c:FindFirstChildOfClass("Humanoid")
             if not root or not hum or hum.Health <= 0 then continue end
 
@@ -208,7 +226,7 @@ if isHeadless then
                             if not (StringFind(name, "hostage", 1, true) or StringFind(name, "citizen", 1, true) or StringFind(name, "server", 1, true)) then
                                 local mh = v:FindFirstChildOfClass("Humanoid")
                                 if mh and mh.Health > 0 then
-                                    local hrp = v:FindFirstChild("HumanoidRootPart") :: BasePart
+                                    local hrp = v.HumanoidRootPart
                                     local tPos = hrp.Position
                                     if tPos.Y >= MIN_Y_LEVEL then
                                         local dist = VectorMagnitude(myPos - tPos)
@@ -249,31 +267,11 @@ if isHeadless then
                     elseif mode == "Middle" then root.CFrame = CFrame.lookAt(pos + (look * 2.5), pos)
                     else root.CFrame = CFrame.lookAt(pos + VectorCreate(0, OFFSET_DISTANCE, 0), pos) end
 
-                    local cam = Workspace.CurrentCamera
-                    if cam then
-                        cam.CFrame = CFrame.lookAt(cam.CFrame.Position, closestTarget.Position)
-                    end
-
                     if not isAttacking then
                         isAttacking = true
                         task.spawn(function()
-                            if isrbxactive and not isrbxactive() then
-                                -- Do nothing if Roblox is not active, hardware inputs will fail
-                            else
-                                if mouse1press and mouse1release then
-                                    mouse1press()
-                                    task.wait(0.05) 
-                                    mouse1release()
-                                end
-                                if keypress and keyrelease then
-                                    for _, k in ATTACK_KEYS do
-                                        keypress(k)
-                                        task.wait(0.05)
-                                        keyrelease(k)
-                                    end
-                                end
-                            end
-                            task.wait(0.1) 
+                            performAttack(ATTACK_KEYS)
+                            task.wait(0.1)
                             isAttacking = false
                         end)
                     end
@@ -315,7 +313,7 @@ local Config = {
     TargetPlayer = "None"
 }
 
-local function SerializeConfig(cfg: any)
+local function SerializeConfig(cfg)
     local parts = {
         "HitPosition:"     .. tostring(cfg.HitPosition),
         "OffsetDistance:"  .. tostring(cfg.OffsetDistance),
@@ -328,7 +326,7 @@ local function SerializeConfig(cfg: any)
     return TableConcat(parts, "\n") .. "\n"
 end
 
-local function DeserializeConfig(str: string)
+local function DeserializeConfig(str)
     local cfg = {}
     for _, line in StringSplit(str, "\n") do
         if line == "" then continue end
@@ -406,7 +404,7 @@ end
 local lastSummonTime = 0
 local isAttacking = false
 
-local function isWhitelisted(entity: Model)
+local function isWhitelisted(entity)
     if not entity then return false end
     local entName = StringLower(entity.Name)
 
@@ -505,7 +503,7 @@ local function getPlayerNames()
     return list
 end
 
-local function UpdateUIElement(element: any, value: any)
+local function UpdateUIElement(element, value)
     if not element then return end
     pcall(function()
         if type(element.Set) == "function" then element:Set(value)
@@ -777,7 +775,7 @@ for _, loc in tpLocations do
     local btn = tpTab:addButton({ text = loc.name })
     btn.OnClick:Connect(function()
         local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart
+        local root = char and char:FindFirstChild("HumanoidRootPart")
         if root then
             task.spawn(function()
                 for i = 1, 5 do
@@ -827,14 +825,11 @@ teleportToPlayerBtn.OnClick:Connect(function()
     local targetPlr = Players:FindFirstChild(selectedTpPlayer)
     if targetPlr and targetPlr.Character and targetPlr.Character:FindFirstChild("HumanoidRootPart") then
         local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart
+        local root = char and char:FindFirstChild("HumanoidRootPart")
         if root then
             task.spawn(function()
                 for i = 1, 5 do
-                    local t_root = targetPlr.Character:FindFirstChild("HumanoidRootPart") :: BasePart
-                    if t_root then
-                        root.CFrame = CFrame.new(t_root.Position + VectorCreate(0, 3, 0))
-                    end
+                    root.CFrame = CFrame.new(targetPlr.Character.HumanoidRootPart.Position + VectorCreate(0, 3, 0))
                     task.wait(0.05)
                 end
                 notify("Teleported to " .. targetPlr.Name .. "!")
@@ -1055,22 +1050,22 @@ end
 -- ==========================================
 -- SHARED COMBAT HELPERS
 -- ==========================================
-local function isStandOut(char: Model)
+local function isStandOut(char)
     if not char then return false end
     local standAttr = char:GetAttribute("SummonedStand")
     return (standAttr and standAttr ~= "" and standAttr ~= false)
 end
 
 local function forceSummon()
-    if keypress and keyrelease then
+    if keypress then
         keypress(SUMMON_KEY)
         task.wait(0.1 + (MathRandom() * 0.05))
-        keyrelease(SUMMON_KEY)
+        if keyrelease then keyrelease(SUMMON_KEY) end
     end
     lastSummonTime = OsClock()
 end
 
-local function calculateTargetCFrame(targetRoot: BasePart): CFrame
+local function calculateTargetCFrame(targetRoot)
     local pos = targetRoot.Position
     local look = targetRoot.CFrame.LookVector
     local mode = hitPosition
@@ -1117,7 +1112,7 @@ task.spawn(function()
         local char = player.Character
         if not char then continue end
 
-        local root = char:FindFirstChild("HumanoidRootPart") :: BasePart
+        local root = char:FindFirstChild("HumanoidRootPart")
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
@@ -1138,7 +1133,7 @@ task.spawn(function()
                     if not (StringFind(name, "hostage", 1, true) or StringFind(name, "citizen", 1, true)) then
                         local mobHum = v:FindFirstChildOfClass("Humanoid")
                         if mobHum and mobHum.Health > 0 then
-                            local hrp = v:FindFirstChild("HumanoidRootPart") :: BasePart
+                            local hrp = v.HumanoidRootPart
                             local tPos = hrp.Position
                             if tPos.Y > MIN_Y_LEVEL then
                                 local dist = VectorMagnitude(myPos - tPos)
@@ -1154,32 +1149,10 @@ task.spawn(function()
 
             if closestTarget then
                 root.CFrame = calculateTargetCFrame(closestTarget)
-                
-                -- Ensure camera points at target so M1 Hitboxes connect
-                local cam = Workspace.CurrentCamera
-                if cam then
-                    cam.CFrame = CFrame.lookAt(cam.CFrame.Position, closestTarget.Position)
-                end
-                
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
-                        if isrbxactive and not isrbxactive() then
-                            -- Ignore hardware simulation if window is unfocused
-                        else
-                            if mouse1press and mouse1release then
-                                mouse1press()
-                                task.wait(0.05)
-                                mouse1release()
-                            end
-                            if keypress and keyrelease then
-                                for _, k in ATTACK_KEYS do
-                                    keypress(k)
-                                    task.wait(0.05)
-                                    keyrelease(k)
-                                end
-                            end
-                        end
+                        performAttack(ATTACK_KEYS)
                         task.wait(0.1)
                         isAttacking = false
                     end)
@@ -1205,7 +1178,7 @@ task.spawn(function()
         local char = player.Character
         if not char then continue end
 
-        local root = char:FindFirstChild("HumanoidRootPart") :: BasePart
+        local root = char:FindFirstChild("HumanoidRootPart")
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
@@ -1237,7 +1210,7 @@ task.spawn(function()
                     if isTarget then
                         local mobHum = v:FindFirstChildOfClass("Humanoid")
                         if mobHum and mobHum.Health > 0 then
-                            local hrp = v:FindFirstChild("HumanoidRootPart") :: BasePart
+                            local hrp = v.HumanoidRootPart
                             local tPos = hrp.Position
                             if tPos.Y > MIN_Y_LEVEL then
                                 local dist = VectorMagnitude(myPos - tPos)
@@ -1253,32 +1226,10 @@ task.spawn(function()
 
             if closestTarget then
                 root.CFrame = calculateTargetCFrame(closestTarget)
-                
-                -- Ensure camera points at target so M1 Hitboxes connect
-                local cam = Workspace.CurrentCamera
-                if cam then
-                    cam.CFrame = CFrame.lookAt(cam.CFrame.Position, closestTarget.Position)
-                end
-                
                 if not isAttacking then
                     isAttacking = true
                     task.spawn(function()
-                        if isrbxactive and not isrbxactive() then
-                            -- Ignore hardware simulation if window is unfocused
-                        else
-                            if mouse1press and mouse1release then
-                                mouse1press()
-                                task.wait(0.05)
-                                mouse1release()
-                            end
-                            if keypress and keyrelease then
-                                for _, k in ATTACK_KEYS do
-                                    keypress(k)
-                                    task.wait(0.05)
-                                    keyrelease(k)
-                                end
-                            end
-                        end
+                        performAttack(ATTACK_KEYS)
                         task.wait(0.1)
                         isAttacking = false
                     end)
@@ -1296,7 +1247,7 @@ local function findCombatTarget()
     if not liveFolder then return nil end
 
     local char = player.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart
+    local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return nil end
 
     local myPos = root.Position
@@ -1322,10 +1273,10 @@ local function findCombatTarget()
         if isRealPlayer then continue end
 
         local mobHum = v:FindFirstChildOfClass("Humanoid")
-        local targetHrp = (v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")) :: BasePart
+        local targetHrp = v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")
 
         if targetHrp and mobHum and mobHum.Health > 0 then
-             if targetHrp.Position.Y > 10000 then
+            if targetHrp.Position.Y > 10000 then
                 local dist = VectorMagnitude(myPos - targetHrp.Position)
                 if dist < minDistance then
                     minDistance = dist
@@ -1343,7 +1294,7 @@ task.spawn(function()
         if not isConjFarmOn then continue end
 
         local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart
+        local root = char and char:FindFirstChild("HumanoidRootPart")
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
@@ -1351,7 +1302,7 @@ task.spawn(function()
             -- PHASE 1: YOGA MAT
             local map = Workspace:FindFirstChild("Map")
             local meditation = map and map:FindFirstChild("Meditation")
-            local yogaMat = meditation and meditation:FindFirstChild("Yoga Mat") :: BasePart
+            local yogaMat = meditation and meditation:FindFirstChild("Yoga Mat")
 
             if yogaMat and isConjFarmOn then
                 local teleported = false
@@ -1364,14 +1315,10 @@ task.spawn(function()
 
                     local startPos = root.Position
 
-                    if keypress and keyrelease and isConjFarmOn then
-                        keypress(A_KEY)
-                        task.wait(0.05) 
-                        keyrelease(A_KEY)
+                    if keypress and isConjFarmOn then
+                        keypress(A_KEY); task.wait(0.05); if keyrelease then keyrelease(A_KEY) end
                         task.wait(0.05)
-                        keypress(D_KEY)
-                        task.wait(0.05) 
-                        keyrelease(D_KEY)
+                        keypress(D_KEY); task.wait(0.05); if keyrelease then keyrelease(D_KEY) end
                     end
                     task.wait(0.2)
 
@@ -1381,7 +1328,7 @@ task.spawn(function()
                             task.wait()
                             local cam = Workspace.CurrentCamera
                             local c = player.Character
-                            local head = c and c:FindFirstChild("Head") :: BasePart
+                            local head = c and c:FindFirstChild("Head")
                             if cam and head and yogaMat then
                                 cam.CFrame = CFrame.lookAt(head.Position + VectorCreate(0, 2, 5), yogaMat.Position)
                             end
@@ -1389,17 +1336,14 @@ task.spawn(function()
                     end)
 
                     local startTime = OsClock()
-                    if keypress and keyrelease and isConjFarmOn then
-                        keypress(E_KEY)
-                        task.wait(0.1) 
-                        keyrelease(E_KEY)
-                        task.wait(0.1)
+                    if keypress and isConjFarmOn then
+                        keypress(E_KEY); task.wait(0.1); if keyrelease then keyrelease(E_KEY) end; task.wait(0.1)
                         keypress(E_KEY)
                     end
 
                     while OsClock() - startTime < 5.5 and isConjFarmOn do
                         task.wait(0.1)
-                        local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart
+                        local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                         if currentHrp and VectorMagnitude(currentHrp.Position - startPos) >= 40 then
                             teleported = true
                             break
@@ -1419,7 +1363,7 @@ task.spawn(function()
             -- PHASE 2: THE SELF
             local npcs = Workspace:FindFirstChild("Npcs")
             local theSelf = npcs and npcs:FindFirstChild("The Self")
-            local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart") :: BasePart
+            local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart")
 
             if selfHrp and isConjFarmOn then
                 local inArena = false
@@ -1427,24 +1371,17 @@ task.spawn(function()
                     for i = 1, 5 do
                         local targetCFrame = selfHrp.CFrame * CFrame.new(0, 0, -3)
                         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                            local my_root = player.Character:FindFirstChild("HumanoidRootPart") :: BasePart
-                            my_root.CFrame = CFrame.lookAt(targetCFrame.Position, selfHrp.Position)
+                            player.Character.HumanoidRootPart.CFrame = CFrame.lookAt(targetCFrame.Position, selfHrp.Position)
                         end
                         task.wait(0.05)
                     end
 
-                    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart
-                    if not hrp then continue end
-                    local startPos = hrp.Position
+                    local startPos = player.Character.HumanoidRootPart.Position
 
-                    if keypress and keyrelease and isConjFarmOn then
-                        keypress(A_KEY)
-                        task.wait(0.05) 
-                        keyrelease(A_KEY)
+                    if keypress and isConjFarmOn then
+                        keypress(A_KEY); task.wait(0.05); if keyrelease then keyrelease(A_KEY) end
                         task.wait(0.05)
-                        keypress(D_KEY)
-                        task.wait(0.05)
-                        keyrelease(D_KEY)
+                        keypress(D_KEY); task.wait(0.05); if keyrelease then keyrelease(D_KEY) end
                     end
                     task.wait(0.2)
 
@@ -1454,13 +1391,13 @@ task.spawn(function()
 
                     while isConjFarmOn do
                         task.wait(0.05)
-                        if keypress and keyrelease then
+                        if keypress then
                             keypress(ONE_KEY)
-                            task.wait(0.05)
-                            keyrelease(ONE_KEY)
+                            task.wait(0.01)
+                            if keyrelease then keyrelease(ONE_KEY) end
                         end
 
-                        local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart
+                        local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                         if (curHrp and VectorMagnitude(curHrp.Position - startPos) >= 40) or findCombatTarget() then
                             inArena = true
                             break
@@ -1497,47 +1434,22 @@ task.spawn(function()
         while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn do
             task.wait(0.05)
             local c = player.Character
-            local r = c and c:FindFirstChild("HumanoidRootPart") :: BasePart
+            local r = c and c:FindFirstChild("HumanoidRootPart")
             local charHum = c and c:FindFirstChildOfClass("Humanoid")
             if not r or not charHum or charHum.Health <= 0 then break end
 
             if not isStandOut(c) and (OsClock() - lastSummon) > 3 then
-                if keypress and keyrelease then 
-                    keypress(SUMMON_KEY)
-                    task.wait(0.1)
-                    keyrelease(SUMMON_KEY) 
-                end
+                if keypress then keypress(SUMMON_KEY); task.wait(0.1); if keyrelease then keyrelease(SUMMON_KEY) end end
                 lastSummon = OsClock()
             end
 
             r.CFrame = calculateTargetCFrame(target.hrp)
-            
-            -- Ensure camera points at target so M1 Hitboxes connect
-            local cam = Workspace.CurrentCamera
-            if cam then
-                cam.CFrame = CFrame.lookAt(cam.CFrame.Position, target.hrp.Position)
-            end
 
             if not attacking then
                 attacking = true
                 task.spawn(function()
-                    if isrbxactive and not isrbxactive() then
-                        -- Ignore hardware simulation if window is unfocused
-                    else
-                        if mouse1press and mouse1release then
-                            mouse1press()
-                            task.wait(0.05)
-                            mouse1release()
-                        end
-                        if keypress and keyrelease then
-                            for _, k in ATTACK_KEYS do
-                                keypress(k)
-                                task.wait(0.05)
-                                keyrelease(k)
-                            end
-                        end
-                    end
-                    task.wait(0.1) 
+                    performAttack(ATTACK_KEYS)
+                    task.wait(0.1)
                     attacking = false
                 end)
             end
@@ -1549,7 +1461,7 @@ task.spawn(function()
             repeat
                 task.wait(0.5)
                 local curChar = player.Character
-                local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart") :: BasePart
+                local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
                 -- We know we have returned to the gym when our Y position falls out of the sky
             until not isConjFarmOn or not curHrp or curHrp.Position.Y < 10000 or (OsClock() - returnTimer > 15)
             task.wait(1)
