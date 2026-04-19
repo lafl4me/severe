@@ -24,7 +24,7 @@ local VectorMagnitude = vector.magnitude
 local player = Players.LocalPlayer
 
 local function notify(text: string)
-    send_notification(text)
+    send_notification(text, "Info")
 end
 
 -- ==========================================
@@ -44,26 +44,21 @@ end
 local function cleanKey(key): string
     if not key then return "Q" end
     local upperKey = StringUpper(tostring(key))
-  
     if upperKey == "TAB" then return "Tab" end
     return upperKey
 end
 
 -- ==========================================
--- IMPROVED INPUT SIMULATION (EXTERNAL FIX)
+-- FIXED: Single-thread sequenced input fire
 -- ==========================================
-local function performAttack(attackKeys)
-    if mouse1press then
-        mouse1press()
-        task.wait(0.03 + (MathRandom() * 0.02))
-        if mouse1release then mouse1release() end
-    end
-    if keypress then
-        for _, k in attackKeys do
-            keypress(k)
-            task.wait(0.02 + (MathRandom() * 0.01))
-            if keyrelease then keyrelease(k) end
-        end
+local function fireAttack(attackKeys: {number})
+    mouse1press()
+    task.wait(0.05)
+    mouse1release()
+    for _, k in attackKeys do
+        keypress(k)
+        task.wait(0.01 + MathRandom() * 0.01)
+        keyrelease(k)
     end
 end
 
@@ -114,11 +109,9 @@ if isHeadless then
     end
 
     local function forceSummon()
-        if keypress then
-            keypress(SUMMON_KEY)
-            task.wait(0.1 + (MathRandom() * 0.05))
-            if keyrelease then keyrelease(SUMMON_KEY) end
-        end
+        keypress(SUMMON_KEY)
+        task.wait(0.1 + (MathRandom() * 0.05))
+        keyrelease(SUMMON_KEY)
         lastSummonTime = OsClock()
     end
 
@@ -135,17 +128,11 @@ if isHeadless then
             local viewport = camera.ViewportSize
             local absX = viewport.X * scaleX
             local absY = (viewport.Y * scaleY) + TOPBAR_OFFSET
-            if mousemoveabs then
-                mousemoveabs(absX + MathRandom(-3, 3), absY + MathRandom(-3, 3))
-            end
+            mousemoveabs(absX + MathRandom(-3, 3), absY + MathRandom(-3, 3))
             task.wait(0.05 + (MathRandom() * 0.05))
-            if mouse1click then mouse1click() else
-                if mouse1press then 
-                    mouse1press()
-                    task.wait(0.03 + MathRandom()*0.03)
-                    if mouse1release then mouse1release() end 
-                end
-            end
+            mouse1press()
+            task.wait(0.05)
+            mouse1release()
         end
 
         local emptyTimer = 0
@@ -153,7 +140,6 @@ if isHeadless then
             task.wait(0.5)
             local c = player.Character
             local hum = c and c:FindFirstChildOfClass("Humanoid")
-           
             local inGame = c and c:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0
 
             if not inGame then
@@ -270,8 +256,7 @@ if isHeadless then
                     if not isAttacking then
                         isAttacking = true
                         task.spawn(function()
-                            performAttack(ATTACK_KEYS)
-                            task.wait(0.1)
+                            fireAttack(ATTACK_KEYS)
                             isAttacking = false
                         end)
                     end
@@ -286,16 +271,6 @@ end
 -- ==============================================================================
 -- BIZARRE LINEAGE HUB
 -- ==============================================================================
-
-local FOLDER_PATH = "BZL"
-local SLOT_COUNT = 6
-local currentSelectedSlot = "Config 1"
-
-if makefolder and isfolder then
-    if not isfolder(FOLDER_PATH) then
-        pcall(function() makefolder(FOLDER_PATH) end)
-    end
-end
 
 local rawUiSummonStr = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q"
 local rawUiAttackStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E", "R", "Z", "X", "C", "V"}
@@ -312,61 +287,6 @@ local Config = {
     WhitelistedNames = {},
     TargetPlayer = "None"
 }
-
-local function SerializeConfig(cfg)
-    local parts = {
-        "HitPosition:"     .. tostring(cfg.HitPosition),
-        "OffsetDistance:"  .. tostring(cfg.OffsetDistance),
-        "RandomSwitchSpeed:" .. tostring(cfg.RandomSwitchSpeed),
-        "SummonKeyStr:"    .. tostring(cfg.SummonKeyStr),
-        "AttackKeyStrs:"   .. TableConcat(cfg.AttackKeyStrs, ","),
-        "WhitelistedNames:" .. TableConcat(cfg.WhitelistedNames, ","),
-        "TargetPlayer:"    .. tostring(cfg.TargetPlayer or "None"),
-    }
-    return TableConcat(parts, "\n") .. "\n"
-end
-
-local function DeserializeConfig(str)
-    local cfg = {}
-    for _, line in StringSplit(str, "\n") do
-        if line == "" then continue end
-        local key, val = StringMatch(line, "([^:]+):(.*)")
-        if key and val then
-            key = trim(key)
-            val = trim(val)
-            if key == "OffsetDistance" or key == "RandomSwitchSpeed" then
-                cfg[key] = tonumber(val) or 10
-            elseif key == "AttackKeyStrs" or key == "WhitelistedNames" then
-                local arr = {}
-                for _, k in StringSplit(val, ",") do
-                    k = trim(k)
-                    if k ~= "" then TableInsert(arr, k) end
-                end
-                cfg[key] = arr
-            else
-                cfg[key] = val
-            end
-        end
-    end
-    return cfg
-end
-
-local AutoLoadedName = nil
-for i = 1, SLOT_COUNT do
-    local baseName = "Config " .. i
-    local targetFile = FOLDER_PATH .. "/" .. baseName .. ".txt"
-    if isfile and isfile(targetFile) and readfile then
-        local success, result = pcall(function()
-            return DeserializeConfig(readfile(targetFile))
-        end)
-        if success and type(result) == "table" then
-            for k, v in result do Config[k] = v end
-            AutoLoadedName = baseName
-            currentSelectedSlot = baseName
-            break
-        end
-    end
-end
 
 if not Config.RandomSwitchSpeed then Config.RandomSwitchSpeed = 2 end
 if not Config.WhitelistedNames then Config.WhitelistedNames = {} end
@@ -503,15 +423,6 @@ local function getPlayerNames()
     return list
 end
 
-local function UpdateUIElement(element, value)
-    if not element then return end
-    pcall(function()
-        if type(element.Set) == "function" then element:Set(value)
-        elseif type(element.SetValue) == "function" then element:SetValue(value)
-        elseif type(element.set) == "function" then element:set(value) end
-    end)
-end
-
 -- ==========================================
 -- UI INITIALIZATION & CUSTOM THEME
 -- ==========================================
@@ -542,7 +453,6 @@ local mobTab    = win:addTab("Target")
 local combatTab = win:addTab("Farm Setup")
 local conjTab   = win:addTab("Conjuration")
 local tpTab     = win:addTab("Teleports")
-local setTab    = win:addTab("Config")
 
 -- ==========================================
 -- TAB: RANDOMIZED KILLING
@@ -600,8 +510,6 @@ whitelistDrop.OnChanged:Connect(function(val1, val2)
             TableInsert(Config.WhitelistedNames, v)
         end
     end
-
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
 local refreshWlBtn = lobbyTab:addButton({ text = "Refresh Players" })
@@ -625,7 +533,6 @@ local mobDropdown = mobTab:addDropdown({ text = "Target NPC / Mob", items = init
 mobDropdown.OnChanged:Connect(function(val)
     if type(val) == "string" then
         selectedMob = val
-        if _G.UpdateLiveState then _G.UpdateLiveState() end
     end
 end)
 
@@ -649,7 +556,6 @@ playerDropdown.OnChanged:Connect(function(val)
     if type(val) == "string" then
         selectedPlayerTarget = val
         Config.TargetPlayer = val
-        if _G.UpdateLiveState then _G.UpdateLiveState() end
     end
 end)
 
@@ -677,31 +583,24 @@ end)
 -- TAB: FARM SETUP (Positions & Keybinds)
 -- ==========================================
 combatTab:addText({ text = "  [ AUTOFARM POSITION ]  " })
-combatTab:addText({ text = "⚠ UI Limitation: Sliders do not visually update" })
-combatTab:addText({ text = "when you load a saved config file." })
-combatTab:addText({ text = "Always check the 'Live Bot State' in the Config" })
-combatTab:addText({ text = "tab to see your actual, active settings!" })
 
 local posOptions = {"Above", "Below", "Behind", "Middle", "Random", "Up & down"}
 local posDrop = combatTab:addDropdown({ text = "Hit Position", items = posOptions, defaultIndex = TableFind(posOptions, Config.HitPosition) or 1 })
 posDrop.OnChanged:Connect(function(val)
     hitPosition = val
     Config.HitPosition = val
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
 local distSlider = combatTab:addSlider({ text = "Offset Distance", min = 5, max = 20, mode = "number", default = Config.OffsetDistance })
 distSlider.OnChanged:Connect(function(val)
     OFFSET_DISTANCE = val
     Config.OffsetDistance = val
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
 local randSpeedSlider = combatTab:addSlider({ text = "Switch Delay", min = 1, max = 10, mode = "number", default = Config.RandomSwitchSpeed })
 randSpeedSlider.OnChanged:Connect(function(val)
     RANDOM_SWITCH_SPEED = val
     Config.RandomSwitchSpeed = val
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
 combatTab:addText({ text = " " })
@@ -716,7 +615,6 @@ summonKeyDrop.OnChanged:Connect(function(val)
     if type(val) == "string" and KEY_MAP[val] then
         SUMMON_KEY = KEY_MAP[val]
         Config.SummonKeyStr = val
-        if _G.UpdateLiveState then _G.UpdateLiveState() end
     end
 end)
 
@@ -739,7 +637,6 @@ attackKeysDrop.OnChanged:Connect(function(indices, values)
             TableInsert(Config.AttackKeyStrs, letter)
         end
     end
-    if _G.UpdateLiveState then _G.UpdateLiveState() end
 end)
 
 -- ==========================================
@@ -841,213 +738,6 @@ teleportToPlayerBtn.OnClick:Connect(function()
 end)
 
 -- ==========================================
--- TAB: CONFIGURATION & SAVING
--- ==========================================
-setTab:addText({ text = "  [ DATA MANAGER ]  " })
-
-local function getSlotsAndCount()
-    local slots = {}
-    local count = 0
-    for i = 1, SLOT_COUNT do
-        local baseName = "Config " .. i
-        local targetPath = FOLDER_PATH .. "/" .. baseName .. ".txt"
-        if isfile and isfile(targetPath) then
-            TableInsert(slots, baseName .. "  (Saved)")
-            count = count + 1
-        else
-            TableInsert(slots, baseName .. "  (Empty)")
-        end
-    end
-    return slots, count
-end
-
-local initialSlots, initialCount = getSlotsAndCount()
-
-local dropDefaultIdx = 1
-for i, v in initialSlots do
-    if StringFind(v, "^" .. currentSelectedSlot) then dropDefaultIdx = i end
-end
-
-local configDrop = setTab:addDropdown({
-    text = "Select Slot",
-    items = initialSlots,
-    defaultIndex = dropDefaultIdx
-})
-configDrop.OnChanged:Connect(function(val)
-    local strVal = type(val) == "table" and val[1] or tostring(val)
-    local parsed = StringMatch(strVal, "^(Config %d+)")
-    if parsed then
-        currentSelectedSlot = parsed
-    end
-end)
-
-local configStatus = setTab:addText({ text = (AutoLoadedName and ("Status: Auto-Loaded " .. AutoLoadedName) or "Status: Idle") })
-local configCount = setTab:addText({ text = "Found " .. initialCount .. " configs in folder." })
-
-local function refreshConfigUI()
-    local newSlots, newCount = getSlotsAndCount()
-    pcall(function()
-        if configDrop.Refresh then configDrop:Refresh(newSlots)
-        elseif configDrop.update then configDrop:update(newSlots)
-        elseif configDrop.setItems then configDrop:setItems(newSlots) end
-    end)
-    pcall(function() configCount:setText("Found " .. newCount .. " configs in folder.") end)
-end
-
--- LIVE STATE REFERENCES (Bottom of Config)
-local liveState1, liveState2, liveState3, liveState4
-
-_G.UpdateLiveState = function()
-    if not liveState1 or not liveState2 or not liveState3 or not liveState4 then return end
-
-    local atkStr = TableConcat(Config.AttackKeyStrs, ", ")
-    local wlCount = #Config.WhitelistedNames
-
-    local cleanTarget = "None"
-    if selectedMob and selectedMob ~= "None" then
-        cleanTarget = StringMatch(selectedMob, "^(.-) %(") or selectedMob
-    end
-
-    local str1 = StringFormat("Position: %s | Dist: %d | Delay: %ds", tostring(hitPosition), OFFSET_DISTANCE, RANDOM_SWITCH_SPEED)
-    local str2 = StringFormat("Stand: %s | Atk: [%s]", tostring(Config.SummonKeyStr), atkStr)
-    local str3 = StringFormat("Whitelist: %d | Target Mob: %s", wlCount, cleanTarget)
-    local str4 = StringFormat("Target Player: %s", tostring(selectedPlayerTarget))
-
-    pcall(function()
-        if liveState1.setText then
-            liveState1:setText(str1)
-            liveState2:setText(str2)
-            liveState3:setText(str3)
-            liveState4:setText(str4)
-        elseif liveState1.update then
-            liveState1:update(str1)
-            liveState2:update(str2)
-            liveState3:update(str3)
-            liveState4:update(str4)
-        elseif liveState1.set then
-            liveState1:set(str1)
-            liveState2:set(str2)
-            liveState3:set(str3)
-            liveState4:set(str4)
-        end
-    end)
-end
-
-local saveBtn = setTab:addButton({ text = "Save to Selected Slot" })
-saveBtn.OnClick:Connect(function()
-    if writefile then
-        if makefolder and not isfolder(FOLDER_PATH) then pcall(function() makefolder(FOLDER_PATH) end) end
-
-        local targetFile = FOLDER_PATH .. "/" .. currentSelectedSlot .. ".txt"
-        local success, err = pcall(function()
-            local data = SerializeConfig(Config)
-            writefile(targetFile, data)
-        end)
-
-        if success then
-            pcall(function() configStatus:setText("Status: Saved " .. currentSelectedSlot) end)
-            notify("Successfully saved " .. currentSelectedSlot .. "!")
-            refreshConfigUI()
-        else
-            pcall(function() configStatus:setText("Err: Save Failed") end)
-            notify("Save Failed: Check F9 Console")
-        end
-    else
-        notify("Your executor does not support writing files.")
-    end
-end)
-
-local deleteBtn = setTab:addButton({ text = "Delete Selected Config" })
-deleteBtn.OnClick:Connect(function()
-    local targetFile = FOLDER_PATH .. "/" .. currentSelectedSlot .. ".txt"
-    if isfile and isfile(targetFile) then
-        if delfile then
-            pcall(function() delfile(targetFile) end)
-            notify("Deleted " .. currentSelectedSlot .. "!")
-            pcall(function() configStatus:setText("Status: Deleted " .. currentSelectedSlot) end)
-            refreshConfigUI()
-        else
-            notify("Your executor does not support deleting files.")
-        end
-    else
-        notify("Config " .. currentSelectedSlot .. " is already empty!")
-    end
-end)
-
-local loadBtn = setTab:addButton({ text = "Load Selected Slot" })
-loadBtn.OnClick:Connect(function()
-    local targetFile = FOLDER_PATH .. "/" .. currentSelectedSlot .. ".txt"
-    if isfile and isfile(targetFile) and readfile then
-        local success, result = pcall(function()
-            return DeserializeConfig(readfile(targetFile))
-        end)
-        if success and type(result) == "table" then
-            for k, v in result do Config[k] = v end
-            if not Config.RandomSwitchSpeed then Config.RandomSwitchSpeed = 2 end
-            if not Config.WhitelistedNames then Config.WhitelistedNames = {} end
-            if not Config.TargetPlayer then Config.TargetPlayer = "None" end
-
-            -- Push Loaded Settings
-            hitPosition = Config.HitPosition
-            OFFSET_DISTANCE = Config.OffsetDistance
-            RANDOM_SWITCH_SPEED = Config.RandomSwitchSpeed
-            SUMMON_KEY = KEY_MAP[Config.SummonKeyStr] or 0x51
-            selectedPlayerTarget = Config.TargetPlayer
-
-            ATTACK_KEYS = {}
-            for _, str in Config.AttackKeyStrs do
-                if KEY_MAP[str] then TableInsert(ATTACK_KEYS, KEY_MAP[str]) end
-            end
-
-            if _G.UpdateLiveState then _G.UpdateLiveState() end
-
-            -- Attempt visual sync
-            UpdateUIElement(posDrop, Config.HitPosition)
-            UpdateUIElement(distSlider, Config.OffsetDistance)
-            UpdateUIElement(randSpeedSlider, Config.RandomSwitchSpeed)
-            UpdateUIElement(summonKeyDrop, Config.SummonKeyStr)
-            UpdateUIElement(attackKeysDrop, Config.AttackKeyStrs)
-            UpdateUIElement(whitelistDrop, Config.WhitelistedNames)
-            UpdateUIElement(playerDropdown, Config.TargetPlayer)
-
-            pcall(function() configStatus:setText("Status: Loaded " .. currentSelectedSlot) end)
-            notify("Loaded " .. currentSelectedSlot .. " successfully!")
-        else
-            pcall(function() configStatus:setText("Err: File Corrupted") end)
-            notify("Config file is corrupted.")
-        end
-    else
-        pcall(function() configStatus:setText("Status: Slot is Empty") end)
-        notify(currentSelectedSlot .. " is Empty! Nothing to load.")
-    end
-end)
-
-local refreshCfgBtn = setTab:addButton({ text = "Refresh Config Folder" })
-refreshCfgBtn.OnClick:Connect(function()
-    refreshConfigUI()
-    notify("Config list refreshed!")
-end)
-
--- ==========================================
--- LIVE BOT STATE MONITOR
--- ==========================================
-setTab:addText({ text = " " })
-setTab:addText({ text = "  [ LIVE BOT STATE ]  " })
-liveState1 = setTab:addText({ text = "Position: " .. tostring(Config.HitPosition) .. " | Dist: " .. tostring(Config.OffsetDistance) .. " | Delay: " .. tostring(Config.RandomSwitchSpeed) .. "s" })
-liveState2 = setTab:addText({ text = "Stand Key: " .. tostring(Config.SummonKeyStr) .. " | Atk Keys: [" .. TableConcat(Config.AttackKeyStrs, ", ") .. "]" })
-liveState3 = setTab:addText({ text = "Whitelist: 0 | Target Mob: None" })
-liveState4 = setTab:addText({ text = "Target Player: None" })
-
-if _G.UpdateLiveState then _G.UpdateLiveState() end
-
-if AutoLoadedName then
-    task.spawn(function()
-        task.wait(1)
-        notify(AutoLoadedName .. " auto-loaded on launch!")
-    end)
-end
-
--- ==========================================
 -- SHARED COMBAT HELPERS
 -- ==========================================
 local function isStandOut(char)
@@ -1057,11 +747,9 @@ local function isStandOut(char)
 end
 
 local function forceSummon()
-    if keypress then
-        keypress(SUMMON_KEY)
-        task.wait(0.1 + (MathRandom() * 0.05))
-        if keyrelease then keyrelease(SUMMON_KEY) end
-    end
+    keypress(SUMMON_KEY)
+    task.wait(0.1 + (MathRandom() * 0.05))
+    keyrelease(SUMMON_KEY)
     lastSummonTime = OsClock()
 end
 
@@ -1070,7 +758,6 @@ local function calculateTargetCFrame(targetRoot)
     local look = targetRoot.CFrame.LookVector
     local mode = hitPosition
 
-    -- Random Mode Logic
     if mode == "Random" then
         if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
             local modes = {"Above", "Below", "Behind", "Middle"}
@@ -1078,8 +765,6 @@ local function calculateTargetCFrame(targetRoot)
             lastRandomChange = OsClock()
         end
         mode = currentRandomMode
-
-    -- Up & Down Mode Logic
     elseif mode == "Up & down" then
         if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
             if currentRandomMode == "Above" then
@@ -1147,16 +832,13 @@ task.spawn(function()
                 end
             end
 
-            if closestTarget then
+            if closestTarget and not isAttacking then
                 root.CFrame = calculateTargetCFrame(closestTarget)
-                if not isAttacking then
-                    isAttacking = true
-                    task.spawn(function()
-                        performAttack(ATTACK_KEYS)
-                        task.wait(0.1)
-                        isAttacking = false
-                    end)
-                end
+                isAttacking = true
+                task.spawn(function()
+                    fireAttack(ATTACK_KEYS)
+                    isAttacking = false
+                end)
             end
         end
     end
@@ -1224,16 +906,13 @@ task.spawn(function()
                 end
             end
 
-            if closestTarget then
+            if closestTarget and not isAttacking then
                 root.CFrame = calculateTargetCFrame(closestTarget)
-                if not isAttacking then
-                    isAttacking = true
-                    task.spawn(function()
-                        performAttack(ATTACK_KEYS)
-                        task.wait(0.1)
-                        isAttacking = false
-                    end)
-                end
+                isAttacking = true
+                task.spawn(function()
+                    fireAttack(ATTACK_KEYS)
+                    isAttacking = false
+                end)
             end
         end
     end
@@ -1252,7 +931,6 @@ local function findCombatTarget()
 
     local myPos = root.Position
 
-    -- [ALTITUDE LOCK]
     if myPos.Y < 10000 then return nil end
 
     local closestTarget = nil
@@ -1316,9 +994,9 @@ task.spawn(function()
                     local startPos = root.Position
 
                     if keypress and isConjFarmOn then
-                        keypress(A_KEY); task.wait(0.05); if keyrelease then keyrelease(A_KEY) end
+                        keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                         task.wait(0.05)
-                        keypress(D_KEY); task.wait(0.05); if keyrelease then keyrelease(D_KEY) end
+                        keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
                     end
                     task.wait(0.2)
 
@@ -1337,7 +1015,7 @@ task.spawn(function()
 
                     local startTime = OsClock()
                     if keypress and isConjFarmOn then
-                        keypress(E_KEY); task.wait(0.1); if keyrelease then keyrelease(E_KEY) end; task.wait(0.1)
+                        keypress(E_KEY); task.wait(0.1); keyrelease(E_KEY); task.wait(0.1)
                         keypress(E_KEY)
                     end
 
@@ -1379,9 +1057,9 @@ task.spawn(function()
                     local startPos = player.Character.HumanoidRootPart.Position
 
                     if keypress and isConjFarmOn then
-                        keypress(A_KEY); task.wait(0.05); if keyrelease then keyrelease(A_KEY) end
+                        keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
                         task.wait(0.05)
-                        keypress(D_KEY); task.wait(0.05); if keyrelease then keyrelease(D_KEY) end
+                        keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
                     end
                     task.wait(0.2)
 
@@ -1394,7 +1072,7 @@ task.spawn(function()
                         if keypress then
                             keypress(ONE_KEY)
                             task.wait(0.01)
-                            if keyrelease then keyrelease(ONE_KEY) end
+                            keyrelease(ONE_KEY)
                         end
 
                         local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -1423,14 +1101,12 @@ task.spawn(function()
         while not target and isConjFarmOn do
             target = findCombatTarget()
             task.wait(0.1)
-            -- Failsafe: Prevent freezing if the boss fails to spawn
             if OsClock() - waitBoss > 15 then break end
         end
 
         local lastSummon = 0
         local attacking = false
 
-        -- Fortified condition to ensure the target actually exists in Workspace
         while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn do
             task.wait(0.05)
             local c = player.Character
@@ -1439,7 +1115,7 @@ task.spawn(function()
             if not r or not charHum or charHum.Health <= 0 then break end
 
             if not isStandOut(c) and (OsClock() - lastSummon) > 3 then
-                if keypress then keypress(SUMMON_KEY); task.wait(0.1); if keyrelease then keyrelease(SUMMON_KEY) end end
+                keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY)
                 lastSummon = OsClock()
             end
 
@@ -1448,8 +1124,7 @@ task.spawn(function()
             if not attacking then
                 attacking = true
                 task.spawn(function()
-                    performAttack(ATTACK_KEYS)
-                    task.wait(0.1)
+                    fireAttack(ATTACK_KEYS)
                     attacking = false
                 end)
             end
@@ -1462,7 +1137,6 @@ task.spawn(function()
                 task.wait(0.5)
                 local curChar = player.Character
                 local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
-                -- We know we have returned to the gym when our Y position falls out of the sky
             until not isConjFarmOn or not curHrp or curHrp.Position.Y < 10000 or (OsClock() - returnTimer > 15)
             task.wait(1)
         end
