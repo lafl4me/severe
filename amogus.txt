@@ -290,6 +290,7 @@ if isHeadless then
         end
 
         local emptyTimer = 0
+        local bossDefeatedTimer = 0  -- tracks time since mobs cleared while alive
         while true do
             task.wait(0.5)
             if not raidActive then continue end
@@ -298,7 +299,10 @@ if isHeadless then
             local inGame = c and c:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0
 
             if not inGame then
+                -- Not in game: results screen or lobby — click Play/Play Again
                 emptyTimer = 0
+                bossDefeatedTimer = 0
+                task.wait(2.5) -- wait for results screen to fully render
                 clickAtScale(PLAY_SCALE_X, PLAY_SCALE_Y)
             else
                 local lf = Workspace:FindFirstChild("Live")
@@ -318,18 +322,26 @@ if isHeadless then
                     end
                 end
                 if not hasMobs then
-                    if emptyTimer == 0 then
-                        emptyTimer = OsClock()
+                    -- In game but no mobs: boss just died, wait for game to
+                    -- transition to results screen instead of clicking retry
+                    if bossDefeatedTimer == 0 then
+                        bossDefeatedTimer = OsClock()
+                        print("[BZL Hub]: No mobs detected — waiting for results screen...")
                     else
-                        local timeLeft = 2.5 - (OsClock() - emptyTimer)
-                        if timeLeft <= 0 then
+                        local elapsed = OsClock() - bossDefeatedTimer
+                        if elapsed > 8 then
+                            -- Results screen never came, likely in-lobby with no wave
+                            -- Fall back to retry click
+                            print("[BZL Hub]: Results screen timeout — clicking retry.")
                             clickAtScale(RETRY_SCALE_X, RETRY_SCALE_Y)
                             task.wait(4)
-                            emptyTimer = 0
+                            bossDefeatedTimer = 0
                         end
                     end
+                    emptyTimer = 0
                 else
                     emptyTimer = 0
+                    bossDefeatedTimer = 0
                 end
             end
         end
