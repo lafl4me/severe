@@ -210,64 +210,6 @@ if isHeadless then
         end
     end)
 
-    -- ==========================================
-    -- DIO OVER HEAVEN RAID: BLACKHOLE DODGE
-    -- When debug = true in autoraid config, logs every new
-    -- object that appears in Workspace so you can find the
-    -- blackhole's exact name. Once known, set:
-    --   abilityName = "ExactObjectName"
-    -- The dodge flips position to "Below" for 1s then restores.
-    -- ==========================================
-    local DEBUG_MODE      = cfg.autoraid.debug == true
-    local abilityName     = cfg.autoraid.abilityName or "BlackHoleMoving"
-    local positionOverride = nil  -- nil = use user's setting
-    local dioActive = false
-
-    -- Debug spy: logs every new Workspace child to console
-    if DEBUG_MODE then
-        print("[BZL Debug]: Spy mode active. Watching for new Workspace objects...")
-        local seenObjects = {}
-        task.spawn(function()
-            while true do
-                task.wait(0.1)
-                for _, v in Workspace:GetChildren() do
-                    local n = v.Name
-                    if not seenObjects[n] then
-                        seenObjects[n] = true
-                        print("[BZL Debug]: NEW Workspace object -> " .. n .. " (Class: " .. v.ClassName .. ")")
-                    end
-                end
-            end
-        end)
-    end
-
-    -- Dio blackhole dodge watcher (only active if abilityName is set)
-    if abilityName ~= "" then
-        task.spawn(function()
-            local userPosition = hitPosition -- snapshot user's intended position
-            while true do
-                task.wait(0.1)
-                if not raidActive then continue end
-                local abilityObj = Workspace:FindFirstChild(abilityName)
-                    or Workspace:FindFirstChildWhichIsA("BasePart")
-                    and Workspace:FindFirstChild(abilityName, true)
-                -- Broader recursive search
-                if not abilityObj then
-                    abilityObj = Workspace:FindFirstChild(abilityName, true)
-                end
-                if abilityObj and not dioActive then
-                    dioActive = true
-                    print("[BZL Hub]: Dio ability detected (" .. abilityName .. ")! Dodging to Below.")
-                    notify("Dio ability! Dodging...")
-                    positionOverride = "Below"
-                    task.wait(1)
-                    positionOverride = nil
-                    dioActive = false
-                    print("[BZL Hub]: Dio ability gone. Returning to " .. userPosition .. ".")
-                end
-            end
-        end)
-    end
 
     task.spawn(function()
         local PLAY_SCALE_X = 0.5213541666666667
@@ -290,25 +232,6 @@ if isHeadless then
         end
 
         local emptyTimer = 0
-        local bossDefeatedTimer = 0
-
-        -- Play Again button: bottom-right of the raid complete screen
-        -- (~75% X, ~93% Y of viewport — no topbar offset, it's a fullscreen GUI)
-        local PLAY_AGAIN_SCALE_X = 0.75
-        local PLAY_AGAIN_SCALE_Y = 0.93
-
-        local function clickAtScaleNoOffset(scaleX, scaleY)
-            local camera = Workspace.CurrentCamera
-            if not camera then return end
-            local viewport = camera.ViewportSize
-            local absX = viewport.X * scaleX
-            local absY = viewport.Y * scaleY
-            mousemoveabs(absX + MathRandom(-3, 3), absY + MathRandom(-3, 3))
-            task.wait(0.05 + (MathRandom() * 0.05))
-            mouse1press()
-            task.wait(0.05)
-            mouse1release()
-        end
 
         while true do
             task.wait(0.5)
@@ -318,10 +241,7 @@ if isHeadless then
             local inGame = c and c:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0
 
             if not inGame then
-                -- Lobby / loading screen: click the main Play button
                 emptyTimer = 0
-                bossDefeatedTimer = 0
-                task.wait(2)
                 clickAtScale(PLAY_SCALE_X, PLAY_SCALE_Y)
             else
                 local lf = Workspace:FindFirstChild("Live")
@@ -340,33 +260,19 @@ if isHeadless then
                         end
                     end
                 end
-
                 if not hasMobs then
-                    if bossDefeatedTimer == 0 then
-                        bossDefeatedTimer = OsClock()
-                        print("[BZL Hub]: Boss defeated — waiting for results screen...")
+                    if emptyTimer == 0 then
+                        emptyTimer = OsClock()
                     else
-                        local elapsed = OsClock() - bossDefeatedTimer
-                        -- Results screen appears ~3s after boss dies
-                        if elapsed >= 3 and elapsed < 7 then
-                            print("[BZL Hub]: Clicking Play Again on results screen.")
-                            notify("Raid complete! Clicking Play Again...")
-                            task.wait(0.5)
-                            clickAtScaleNoOffset(PLAY_AGAIN_SCALE_X, PLAY_AGAIN_SCALE_Y)
-                            task.wait(4)
-                            bossDefeatedTimer = 0
-                        elseif elapsed >= 12 then
-                            -- Fallback: results screen never showed, likely stuck
-                            print("[BZL Hub]: Results screen timeout — fallback retry click.")
+                        local timeLeft = 2.5 - (OsClock() - emptyTimer)
+                        if timeLeft <= 0 then
                             clickAtScale(RETRY_SCALE_X, RETRY_SCALE_Y)
                             task.wait(4)
-                            bossDefeatedTimer = 0
+                            emptyTimer = 0
                         end
                     end
-                    emptyTimer = 0
                 else
                     emptyTimer = 0
-                    bossDefeatedTimer = 0
                 end
             end
         end
@@ -423,8 +329,7 @@ if isHeadless then
                 if closestTarget then
                     local pos = closestTarget.Position
                     local look = closestTarget.CFrame.LookVector
-                    -- positionOverride is set by ability dodge watchers; nil = use user setting
-                    local mode = positionOverride or hitPosition
+                    local mode = hitPosition
 
                     if mode == "Random" then
                         if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
