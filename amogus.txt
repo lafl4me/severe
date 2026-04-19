@@ -24,7 +24,7 @@ local VectorMagnitude = vector.magnitude
 local player = Players.LocalPlayer
 
 local function notify(text: string)
-    send_notification(text, "Info")
+    send_notification(text, "info")
 end
 
 -- ==========================================
