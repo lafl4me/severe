@@ -62,6 +62,22 @@ local function fireAttack(attackKeys: {number})
     end
 end
 
+-- ==========================================
+-- POSITION NORMALISER
+-- Accepts any casing: "above" / "ABOVE" / "Above" all work.
+-- ==========================================
+local function normalizePosition(s: string): string
+    if type(s) ~= "string" then return "Above" end
+    local low = string.lower(s)
+    if low == "above"            then return "Above"
+    elseif low == "below"        then return "Below"
+    elseif low == "behind"       then return "Behind"
+    elseif low == "random"       then return "Random"
+    elseif low == "up & down" or low == "up&down" or low == "updown" then return "Up & down"
+    end
+    return "Above" -- safe fallback
+end
+
 -- ==============================================================================
 -- AUTO RAID ENGINE (Triggered via _G.Settings.autoraid)
 -- Kill switch: press / (0xBF) to pause/resume mid-raid.
@@ -78,7 +94,7 @@ if isHeadless then
     notify("Auto Raid started! Press / to pause/resume.")
 
     local cfg = _G.Settings
-    local hitPosition = cfg.autoraid.position or "Above"
+    local hitPosition = normalizePosition(cfg.autoraid.position or "Above")
     local RANDOM_SWITCH_SPEED = cfg.autoraid.speed or 1
     local OFFSET_DISTANCE = cfg.autoraid.distance or 10
 
@@ -193,6 +209,65 @@ if isHeadless then
             end
         end
     end)
+
+    -- ==========================================
+    -- DIO OVER HEAVEN RAID: BLACKHOLE DODGE
+    -- When debug = true in autoraid config, logs every new
+    -- object that appears in Workspace so you can find the
+    -- blackhole's exact name. Once known, set:
+    --   abilityName = "ExactObjectName"
+    -- The dodge flips position to "Below" for 1s then restores.
+    -- ==========================================
+    local DEBUG_MODE      = cfg.autoraid.debug == true
+    local abilityName     = cfg.autoraid.abilityName or ""
+    local positionOverride = nil  -- nil = use user's setting
+    local dioActive = false
+
+    -- Debug spy: logs every new Workspace child to console
+    if DEBUG_MODE then
+        print("[BZL Debug]: Spy mode active. Watching for new Workspace objects...")
+        local seenObjects = {}
+        task.spawn(function()
+            while true do
+                task.wait(0.1)
+                for _, v in Workspace:GetChildren() do
+                    local n = v.Name
+                    if not seenObjects[n] then
+                        seenObjects[n] = true
+                        print("[BZL Debug]: NEW Workspace object -> " .. n .. " (Class: " .. v.ClassName .. ")")
+                    end
+                end
+            end
+        end)
+    end
+
+    -- Dio blackhole dodge watcher (only active if abilityName is set)
+    if abilityName ~= "" then
+        task.spawn(function()
+            local userPosition = hitPosition -- snapshot user's intended position
+            while true do
+                task.wait(0.1)
+                if not raidActive then continue end
+                local abilityObj = Workspace:FindFirstChild(abilityName)
+                    or Workspace:FindFirstChildWhichIsA("BasePart")
+                    and Workspace:FindFirstChild(abilityName, true)
+                -- Broader recursive search
+                if not abilityObj then
+                    abilityObj = Workspace:FindFirstChild(abilityName, true)
+                end
+                if abilityObj and not dioActive then
+                    dioActive = true
+                    print("[BZL Hub]: Dio ability detected (" .. abilityName .. ")! Dodging to Below.")
+                    notify("Dio ability! Dodging...")
+                    positionOverride = "Below"
+                    task.wait(1)
+                    positionOverride = nil
+                    dioActive = false
+                    print("[BZL Hub]: Dio ability gone. Returning to " .. userPosition .. ".")
+                end
+            end
+        end)
+    end
 
     task.spawn(function()
         local PLAY_SCALE_X = 0.5213541666666667
@@ -311,7 +386,8 @@ if isHeadless then
                 if closestTarget then
                     local pos = closestTarget.Position
                     local look = closestTarget.CFrame.LookVector
-                    local mode = hitPosition
+                    -- positionOverride is set by ability dodge watchers; nil = use user setting
+                    local mode = positionOverride or hitPosition
 
                     if mode == "Random" then
                         if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
@@ -379,7 +455,7 @@ local isLobbyFarmOn = false
 local isConjFarmOn = false
 local isMobFarmOn = false
 
-local hitPosition = Config.HitPosition
+local hitPosition = normalizePosition(Config.HitPosition)
 local currentRandomMode = "Above"
 local lastRandomChange = 0
 local OFFSET_DISTANCE = Config.OffsetDistance
