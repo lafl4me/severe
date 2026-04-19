@@ -219,7 +219,7 @@ if isHeadless then
     -- The dodge flips position to "Below" for 1s then restores.
     -- ==========================================
     local DEBUG_MODE      = cfg.autoraid.debug == true
-    local abilityName     = cfg.autoraid.abilityName or ""
+    local abilityName     = cfg.autoraid.abilityName or "BlackHoleMoving"
     local positionOverride = nil  -- nil = use user's setting
     local dioActive = false
 
@@ -290,7 +290,26 @@ if isHeadless then
         end
 
         local emptyTimer = 0
-        local bossDefeatedTimer = 0  -- tracks time since mobs cleared while alive
+        local bossDefeatedTimer = 0
+
+        -- Play Again button: bottom-right of the raid complete screen
+        -- (~75% X, ~93% Y of viewport — no topbar offset, it's a fullscreen GUI)
+        local PLAY_AGAIN_SCALE_X = 0.75
+        local PLAY_AGAIN_SCALE_Y = 0.93
+
+        local function clickAtScaleNoOffset(scaleX, scaleY)
+            local camera = Workspace.CurrentCamera
+            if not camera then return end
+            local viewport = camera.ViewportSize
+            local absX = viewport.X * scaleX
+            local absY = viewport.Y * scaleY
+            mousemoveabs(absX + MathRandom(-3, 3), absY + MathRandom(-3, 3))
+            task.wait(0.05 + (MathRandom() * 0.05))
+            mouse1press()
+            task.wait(0.05)
+            mouse1release()
+        end
+
         while true do
             task.wait(0.5)
             if not raidActive then continue end
@@ -299,10 +318,10 @@ if isHeadless then
             local inGame = c and c:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0
 
             if not inGame then
-                -- Not in game: results screen or lobby — click Play/Play Again
+                -- Lobby / loading screen: click the main Play button
                 emptyTimer = 0
                 bossDefeatedTimer = 0
-                task.wait(2.5) -- wait for results screen to fully render
+                task.wait(2)
                 clickAtScale(PLAY_SCALE_X, PLAY_SCALE_Y)
             else
                 local lf = Workspace:FindFirstChild("Live")
@@ -321,18 +340,24 @@ if isHeadless then
                         end
                     end
                 end
+
                 if not hasMobs then
-                    -- In game but no mobs: boss just died, wait for game to
-                    -- transition to results screen instead of clicking retry
                     if bossDefeatedTimer == 0 then
                         bossDefeatedTimer = OsClock()
-                        print("[BZL Hub]: No mobs detected — waiting for results screen...")
+                        print("[BZL Hub]: Boss defeated — waiting for results screen...")
                     else
                         local elapsed = OsClock() - bossDefeatedTimer
-                        if elapsed > 8 then
-                            -- Results screen never came, likely in-lobby with no wave
-                            -- Fall back to retry click
-                            print("[BZL Hub]: Results screen timeout — clicking retry.")
+                        -- Results screen appears ~3s after boss dies
+                        if elapsed >= 3 and elapsed < 7 then
+                            print("[BZL Hub]: Clicking Play Again on results screen.")
+                            notify("Raid complete! Clicking Play Again...")
+                            task.wait(0.5)
+                            clickAtScaleNoOffset(PLAY_AGAIN_SCALE_X, PLAY_AGAIN_SCALE_Y)
+                            task.wait(4)
+                            bossDefeatedTimer = 0
+                        elseif elapsed >= 12 then
+                            -- Fallback: results screen never showed, likely stuck
+                            print("[BZL Hub]: Results screen timeout — fallback retry click.")
                             clickAtScale(RETRY_SCALE_X, RETRY_SCALE_Y)
                             task.wait(4)
                             bossDefeatedTimer = 0
