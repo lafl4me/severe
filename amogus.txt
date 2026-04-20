@@ -352,8 +352,14 @@ if isHeadless then
                     -- ==========================================
                     local effects = Workspace:FindFirstChild("Effects")
                     local dodging = false
-                    if effects and (effects:FindFirstChild("CometAppear") or effects:FindFirstChild("SpinningComet") or effects:FindFirstChild("stand_summon")) then
-                        dodging = true
+                    if effects then
+                        if effects:FindFirstChild("CometAppear") 
+                           or effects:FindFirstChild("SpinningComet") 
+                           or effects:FindFirstChild("stand_summon") 
+                           or effects:FindFirstChild("SlashDiagnolParts2 (Emit)") 
+                           or effects:FindFirstChild("BigBlackHole") then
+                            dodging = true
+                        end
                     end
 
                     if dodging then
@@ -951,7 +957,11 @@ local function isDioAbilityActive()
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return false end
     
-    if effects:FindFirstChild("CometAppear") or effects:FindFirstChild("SpinningComet") or effects:FindFirstChild("stand_summon") then
+    if effects:FindFirstChild("CometAppear") 
+       or effects:FindFirstChild("SpinningComet") 
+       or effects:FindFirstChild("stand_summon") 
+       or effects:FindFirstChild("SlashDiagnolParts2 (Emit)") 
+       or effects:FindFirstChild("BigBlackHole") then
         return true
     end
     
