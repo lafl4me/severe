@@ -124,6 +124,9 @@ if isHeadless then
     local MIN_Y_LEVEL = -150
     local MAX_DISTANCE = 2500
 
+    local dioHeadlessAbilityDetected = false
+    local dioHeadlessAbilityTime = 0
+
     -- ==========================================
     -- KILL SWITCH: press / to toggle raid on/off
     -- ==========================================
@@ -302,6 +305,7 @@ if isHeadless then
             local lf = Workspace:FindFirstChild("Live")
             if lf then
                 local closestTarget = nil
+                local closestTargetChar = nil
                 local minDistance = MathHuge
                 local myPos = root.Position
 
@@ -319,6 +323,7 @@ if isHeadless then
                                         if dist < minDistance and dist < MAX_DISTANCE then
                                             minDistance = dist
                                             closestTarget = hrp
+                                            closestTargetChar = v
                                         end
                                     end
                                 end
@@ -351,15 +356,29 @@ if isHeadless then
                     -- DIO DODGE OVERRIDE
                     -- ==========================================
                     local effects = Workspace:FindFirstChild("Effects")
-                    local dodging = false
-                    if effects then
-                        if effects:FindFirstChild("CometAppear") 
-                           or effects:FindFirstChild("SpinningComet") 
-                           or effects:FindFirstChild("stand_summon") 
-                           or effects:FindFirstChild("SlashDiagnolParts2 (Emit)") 
-                           or effects:FindFirstChild("BigBlackHole") then
-                            dodging = true
+                    local abilityActive = false
+                    
+                    if effects and (effects:FindFirstChild("SlashDiagnolParts2 (Emit)") or effects:FindFirstChild("BigBlackHole")) then
+                        abilityActive = true
+                    end
+
+                    if abilityActive then
+                        if not dioHeadlessAbilityDetected then
+                            dioHeadlessAbilityDetected = true
+                            dioHeadlessAbilityTime = OsClock()
                         end
+                    else
+                        dioHeadlessAbilityDetected = false
+                    end
+
+                    local dodging = false
+                    if dioHeadlessAbilityDetected and (OsClock() - dioHeadlessAbilityTime >= 2) then
+                        dodging = true
+                    end
+                    
+                    -- Cancel dodge if the boss has stand out
+                    if closestTargetChar and isStandOut(closestTargetChar) then
+                        dodging = false
                     end
 
                     if dodging then
@@ -445,6 +464,9 @@ end
 
 local lastSummonTime = 0
 local isAttacking = false
+
+local dioUiAbilityDetected = false
+local dioUiAbilityTime = 0
 
 local function isWhitelisted(entity)
     if not entity then return false end
@@ -953,15 +975,11 @@ window:createbutton(tpTab, {
 -- ==========================================
 -- SHARED COMBAT HELPERS
 -- ==========================================
-local function isDioAbilityActive()
+local function checkDioAbilityActive()
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return false end
     
-    if effects:FindFirstChild("CometAppear") 
-       or effects:FindFirstChild("SpinningComet") 
-       or effects:FindFirstChild("stand_summon") 
-       or effects:FindFirstChild("SlashDiagnolParts2 (Emit)") 
-       or effects:FindFirstChild("BigBlackHole") then
+    if effects:FindFirstChild("SlashDiagnolParts2 (Emit)") or effects:FindFirstChild("BigBlackHole") then
         return true
     end
     
@@ -981,7 +999,7 @@ local function forceSummon()
     lastSummonTime = OsClock()
 end
 
-local function calculateTargetCFrame(targetRoot)
+local function calculateTargetCFrame(targetChar, targetRoot)
     local pos = targetRoot.Position
     local look = targetRoot.CFrame.LookVector
     local mode = hitPosition
@@ -1008,7 +1026,26 @@ local function calculateTargetCFrame(targetRoot)
     -- ==========================================
     -- DODGE MECHANIC
     -- ==========================================
-    if isDioAbilityActive() then
+    if checkDioAbilityActive() then
+        if not dioUiAbilityDetected then
+            dioUiAbilityDetected = true
+            dioUiAbilityTime = OsClock()
+        end
+    else
+        dioUiAbilityDetected = false
+    end
+
+    local dodging = false
+    if dioUiAbilityDetected and (OsClock() - dioUiAbilityTime >= 2) then
+        dodging = true
+    end
+
+    -- "when he has his stand out make sure it doesn't teleprot me"
+    if targetChar and isStandOut(targetChar) then
+        dodging = false
+    end
+
+    if dodging then
         if mode == "Above" then mode = "Below"
         elseif mode == "Below" then mode = "Above"
         elseif mode == "Behind" then mode = "Above"
@@ -1045,6 +1082,7 @@ task.spawn(function()
         local liveFolder = Workspace:FindFirstChild("Live")
         if liveFolder then
             local closestTarget = nil
+            local closestTargetChar = nil
             local minDist = MathHuge
             local myPos = root.Position
 
@@ -1064,6 +1102,7 @@ task.spawn(function()
                                 if dist < minDist and dist < MAX_DISTANCE then
                                     minDist = dist
                                     closestTarget = hrp
+                                    closestTargetChar = v
                                 end
                             end
                         end
@@ -1072,7 +1111,7 @@ task.spawn(function()
             end
 
             if closestTarget then
-                root.CFrame = calculateTargetCFrame(closestTarget)
+                root.CFrame = calculateTargetCFrame(closestTargetChar, closestTarget)
             end
 
             if closestTarget and not isAttacking then
@@ -1113,6 +1152,7 @@ task.spawn(function()
         local liveFolder = Workspace:FindFirstChild("Live")
         if liveFolder then
             local closestTarget = nil
+            local closestTargetChar = nil
             local minDist = MathHuge
             local myPos = root.Position
 
@@ -1141,6 +1181,7 @@ task.spawn(function()
                                 if dist < minDist then
                                     minDist = dist
                                     closestTarget = hrp
+                                    closestTargetChar = v
                                 end
                             end
                         end
@@ -1149,7 +1190,7 @@ task.spawn(function()
             end
 
             if closestTarget then
-                root.CFrame = calculateTargetCFrame(closestTarget)
+                root.CFrame = calculateTargetCFrame(closestTargetChar, closestTarget)
             end
 
             if closestTarget and not isAttacking then
@@ -1203,7 +1244,7 @@ local function findCombatTarget()
                 local dist = VectorMagnitude(myPos - targetHrp.Position)
                 if dist < minDistance then
                     minDistance = dist
-                    closestTarget = {hrp = targetHrp, hum = mobHum}
+                    closestTarget = {hrp = targetHrp, hum = mobHum, charModel = v}
                 end
             end
         end
@@ -1364,7 +1405,7 @@ task.spawn(function()
                 lastSummon = OsClock()
             end
 
-            r.CFrame = calculateTargetCFrame(target.hrp)
+            r.CFrame = calculateTargetCFrame(target.charModel, target.hrp)
 
             if not attacking then
                 attacking = true
