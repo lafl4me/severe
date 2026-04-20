@@ -44,6 +44,7 @@ end
 local function cleanKey(key): string
     if not key then return "Q" end
     local upperKey = StringUpper(tostring(key))
+  
     if upperKey == "TAB" then return "Tab" end
     return upperKey
 end
@@ -344,6 +345,23 @@ if isHeadless then
                             lastRandomChange = OsClock()
                         end
                         mode = currentRandomMode
+                    end
+
+                    -- ==========================================
+                    -- DIO DODGE OVERRIDE
+                    -- ==========================================
+                    local effects = Workspace:FindFirstChild("Effects")
+                    local dodging = false
+                    if effects and (effects:FindFirstChild("CometAppear") or effects:FindFirstChild("SpinningComet") or effects:FindFirstChild("stand_summon")) then
+                        dodging = true
+                    end
+
+                    if dodging then
+                        if mode == "Above" then mode = "Below"
+                        elseif mode == "Below" then mode = "Above"
+                        elseif mode == "Behind" then mode = "Above"
+                        elseif mode == "Middle" then mode = "Below"
+                        end
                     end
 
                     if mode == "Above" then root.CFrame = CFrame.lookAt(pos + VectorCreate(0, OFFSET_DISTANCE, 0), pos)
@@ -929,6 +947,17 @@ window:createbutton(tpTab, {
 -- ==========================================
 -- SHARED COMBAT HELPERS
 -- ==========================================
+local function isDioAbilityActive()
+    local effects = Workspace:FindFirstChild("Effects")
+    if not effects then return false end
+    
+    if effects:FindFirstChild("CometAppear") or effects:FindFirstChild("SpinningComet") or effects:FindFirstChild("stand_summon") then
+        return true
+    end
+    
+    return false
+end
+
 local function isStandOut(char)
     if not char then return false end
     local standAttr = char:GetAttribute("SummonedStand")
@@ -964,6 +993,17 @@ local function calculateTargetCFrame(targetRoot)
             lastRandomChange = OsClock()
         end
         mode = currentRandomMode
+    end
+
+    -- ==========================================
+    -- DODGE MECHANIC
+    -- ==========================================
+    if isDioAbilityActive() then
+        if mode == "Above" then mode = "Below"
+        elseif mode == "Below" then mode = "Above"
+        elseif mode == "Behind" then mode = "Above"
+        elseif mode == "Middle" then mode = "Below"
+        end
     end
 
     if mode == "Above" then return CFrame.lookAt(pos + VectorCreate(0, OFFSET_DISTANCE, 0), pos)
