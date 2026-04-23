@@ -126,6 +126,7 @@ if isHeadless then
 
     local dioHeadlessAbilityDetected = false
     local dioHeadlessAbilityTime = 0
+    local loggedHeadlessDodge = false
 
     -- ==========================================
     -- KILL SWITCH: press / to toggle raid on/off
@@ -358,27 +359,45 @@ if isHeadless then
                     local effects = Workspace:FindFirstChild("Effects")
                     local abilityActive = false
                     
-                    if effects and (effects:FindFirstChild("SlashDiagnolParts2 (Emit)") or effects:FindFirstChild("BigBlackHole")) then
-                        abilityActive = true
+                    if effects then
+                        if effects:FindFirstChild("BigBlackHole") then 
+                            abilityActive = true 
+                        end
+                        local slashi = effects:FindFirstChild("Slashi")
+                        if slashi and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") then
+                            abilityActive = true
+                        end
                     end
 
                     if abilityActive then
                         if not dioHeadlessAbilityDetected then
                             dioHeadlessAbilityDetected = true
                             dioHeadlessAbilityTime = OsClock()
+                            print("[BZL Hub] HEADLESS: Dio Ability Detected! Waiting 2 seconds.")
                         end
                     else
+                        if dioHeadlessAbilityDetected then
+                            print("[BZL Hub] HEADLESS: Dio Ability Despawned. Resetting.")
+                        end
                         dioHeadlessAbilityDetected = false
+                        loggedHeadlessDodge = false
                     end
 
                     local dodging = false
                     if dioHeadlessAbilityDetected and (OsClock() - dioHeadlessAbilityTime >= 2) then
                         dodging = true
+                        if not loggedHeadlessDodge then
+                            print("[BZL Hub] HEADLESS: 2 Seconds passed. Dodging!")
+                            loggedHeadlessDodge = true
+                        end
                     end
                     
-                    -- Cancel dodge if the boss has stand out
                     if closestTargetChar and isStandOut(closestTargetChar) then
                         dodging = false
+                        if loggedHeadlessDodge then
+                            print("[BZL Hub] HEADLESS: Dodge canceled because Dio's stand is OUT!")
+                            loggedHeadlessDodge = false
+                        end
                     end
 
                     if dodging then
@@ -467,6 +486,7 @@ local isAttacking = false
 
 local dioUiAbilityDetected = false
 local dioUiAbilityTime = 0
+local loggedUiDodge = false
 
 local function isWhitelisted(entity)
     if not entity then return false end
@@ -979,7 +999,12 @@ local function checkDioAbilityActive()
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return false end
     
-    if effects:FindFirstChild("SlashDiagnolParts2 (Emit)") or effects:FindFirstChild("BigBlackHole") then
+    if effects:FindFirstChild("BigBlackHole") then 
+        return true 
+    end
+    
+    local slashi = effects:FindFirstChild("Slashi")
+    if slashi and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") then
         return true
     end
     
@@ -1030,19 +1055,33 @@ local function calculateTargetCFrame(targetChar, targetRoot)
         if not dioUiAbilityDetected then
             dioUiAbilityDetected = true
             dioUiAbilityTime = OsClock()
+            print("[BZL Hub] UI: Dio Ability Detected! Waiting 2 seconds.")
         end
     else
+        if dioUiAbilityDetected then
+            print("[BZL Hub] UI: Dio Ability Despawned. Resetting.")
+        end
         dioUiAbilityDetected = false
+        loggedUiDodge = false
     end
 
     local dodging = false
+    -- Wait 2 seconds before executing dodge (ability MUST stay active for 2s)
     if dioUiAbilityDetected and (OsClock() - dioUiAbilityTime >= 2) then
         dodging = true
+        if not loggedUiDodge then
+            print("[BZL Hub] UI: 2 Seconds passed. Dodging!")
+            loggedUiDodge = true
+        end
     end
 
-    -- "when he has his stand out make sure it doesn't teleprot me"
+    -- User constraint: Do not dodge if the boss has his stand out
     if targetChar and isStandOut(targetChar) then
         dodging = false
+        if loggedUiDodge then
+            print("[BZL Hub] UI: Dodge canceled because Dio's stand is OUT!")
+            loggedUiDodge = false
+        end
     end
 
     if dodging then
