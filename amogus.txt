@@ -306,7 +306,6 @@ if isHeadless then
             local lf = Workspace:FindFirstChild("Live")
             if lf then
                 local closestTarget = nil
-                local closestTargetChar = nil
                 local minDistance = MathHuge
                 local myPos = root.Position
 
@@ -324,7 +323,6 @@ if isHeadless then
                                         if dist < minDistance and dist < MAX_DISTANCE then
                                             minDistance = dist
                                             closestTarget = hrp
-                                            closestTargetChar = v
                                         end
                                     end
                                 end
@@ -389,14 +387,6 @@ if isHeadless then
                         if not loggedHeadlessDodge then
                             print("[BZL Hub] HEADLESS: 2 Seconds passed. Dodging!")
                             loggedHeadlessDodge = true
-                        end
-                    end
-                    
-                    if closestTargetChar and isStandOut(closestTargetChar) then
-                        dodging = false
-                        if loggedHeadlessDodge then
-                            print("[BZL Hub] HEADLESS: Dodge canceled because Dio's stand is OUT!")
-                            loggedHeadlessDodge = false
                         end
                     end
 
@@ -1024,7 +1014,7 @@ local function forceSummon()
     lastSummonTime = OsClock()
 end
 
-local function calculateTargetCFrame(targetChar, targetRoot)
+local function calculateTargetCFrame(targetRoot)
     local pos = targetRoot.Position
     local look = targetRoot.CFrame.LookVector
     local mode = hitPosition
@@ -1075,15 +1065,6 @@ local function calculateTargetCFrame(targetChar, targetRoot)
         end
     end
 
-    -- User constraint: Do not dodge if the boss has his stand out
-    if targetChar and isStandOut(targetChar) then
-        dodging = false
-        if loggedUiDodge then
-            print("[BZL Hub] UI: Dodge canceled because Dio's stand is OUT!")
-            loggedUiDodge = false
-        end
-    end
-
     if dodging then
         if mode == "Above" then mode = "Below"
         elseif mode == "Below" then mode = "Above"
@@ -1121,7 +1102,6 @@ task.spawn(function()
         local liveFolder = Workspace:FindFirstChild("Live")
         if liveFolder then
             local closestTarget = nil
-            local closestTargetChar = nil
             local minDist = MathHuge
             local myPos = root.Position
 
@@ -1141,7 +1121,6 @@ task.spawn(function()
                                 if dist < minDist and dist < MAX_DISTANCE then
                                     minDist = dist
                                     closestTarget = hrp
-                                    closestTargetChar = v
                                 end
                             end
                         end
@@ -1150,7 +1129,7 @@ task.spawn(function()
             end
 
             if closestTarget then
-                root.CFrame = calculateTargetCFrame(closestTargetChar, closestTarget)
+                root.CFrame = calculateTargetCFrame(closestTarget)
             end
 
             if closestTarget and not isAttacking then
@@ -1191,7 +1170,6 @@ task.spawn(function()
         local liveFolder = Workspace:FindFirstChild("Live")
         if liveFolder then
             local closestTarget = nil
-            local closestTargetChar = nil
             local minDist = MathHuge
             local myPos = root.Position
 
@@ -1220,7 +1198,6 @@ task.spawn(function()
                                 if dist < minDist then
                                     minDist = dist
                                     closestTarget = hrp
-                                    closestTargetChar = v
                                 end
                             end
                         end
@@ -1229,7 +1206,7 @@ task.spawn(function()
             end
 
             if closestTarget then
-                root.CFrame = calculateTargetCFrame(closestTargetChar, closestTarget)
+                root.CFrame = calculateTargetCFrame(closestTarget)
             end
 
             if closestTarget and not isAttacking then
@@ -1444,7 +1421,7 @@ task.spawn(function()
                 lastSummon = OsClock()
             end
 
-            r.CFrame = calculateTargetCFrame(target.charModel, target.hrp)
+            r.CFrame = calculateTargetCFrame(target.hrp)
 
             if not attacking then
                 attacking = true
