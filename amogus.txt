@@ -215,12 +215,12 @@ if isHeadless then
         end
     end)
 
-
+    -- ==========================================
+    -- AUTO-RETRY WATCHER
+    -- ==========================================
     task.spawn(function()
         local PLAY_SCALE_X = 0.5213541666666667
         local PLAY_SCALE_Y = 0.6333002973240832
-        local RETRY_SCALE_X = 0.5494791666666666
-        local RETRY_SCALE_Y = 0.6950
         local TOPBAR_OFFSET = 36
 
         local function clickAtScale(scaleX, scaleY)
@@ -237,6 +237,7 @@ if isHeadless then
         end
 
         local emptyTimer = 0
+        local everSawBoss = false
 
         while true do
             task.wait(0.5)
@@ -247,6 +248,7 @@ if isHeadless then
 
             if not inGame then
                 emptyTimer = 0
+                everSawBoss = false
                 clickAtScale(PLAY_SCALE_X, PLAY_SCALE_Y)
             else
                 local lf = Workspace:FindFirstChild("Live")
@@ -255,25 +257,38 @@ if isHeadless then
                     for _, v in lf:GetChildren() do
                         if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
                             local name = StringLower(v.Name)
-                            if not (StringFind(name, "hostage", 1, true) or StringFind(name, "citizen", 1, true) or StringFind(name, "server", 1, true)) then
-                                local mh = v:FindFirstChildOfClass("Humanoid")
-                                if mh and mh.Health > 0 then
-                                    hasMobs = true
-                                    break
+                            -- STRICT CHECK: Must perfectly match the attack logic target criteria
+                            if StringFind(name, ".", 1, true) == 1 then
+                                if not (StringFind(name, "hostage", 1, true) or StringFind(name, "citizen", 1, true) or StringFind(name, "server", 1, true)) then
+                                    local mh = v:FindFirstChildOfClass("Humanoid")
+                                    if mh and mh.Health > 0 then
+                                        hasMobs = true
+                                        everSawBoss = true
+                                        break
+                                    end
                                 end
                             end
                         end
                     end
                 end
+                
                 if not hasMobs then
-                    if emptyTimer == 0 then
-                        emptyTimer = OsClock()
-                    else
-                        local timeLeft = 2.5 - (OsClock() - emptyTimer)
-                        if timeLeft <= 0 then
-                            clickAtScale(RETRY_SCALE_X, RETRY_SCALE_Y)
-                            task.wait(4)
-                            emptyTimer = 0
+                    if everSawBoss then
+                        if emptyTimer == 0 then
+                            emptyTimer = OsClock()
+                            print("[BZL Hub] HEADLESS: Dio is dead! Waiting for Retry UI...")
+                        else
+                            local timeLeft = 4 - (OsClock() - emptyTimer)
+                            if timeLeft <= 0 then
+                                print("[BZL Hub] HEADLESS: Clicking Retry Button!")
+                                -- Clicking broader coordinates aligned with the right side (Green Retry Button)
+                                clickAtScale(0.55, 0.69)
+                                task.wait(0.1)
+                                clickAtScale(0.60, 0.69)
+                                task.wait(4)
+                                emptyTimer = 0
+                                everSawBoss = false
+                            end
                         end
                     end
                 else
