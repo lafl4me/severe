@@ -1,148 +1,356 @@
 --!strict
 --!optimize 2
 
+-- ==============================================================================
+-- BIZARRE LINEAGE HUB
+-- OK's UI Library v2 | External (Severe)
+-- ==============================================================================
 
-local Players  = game:GetService("Players")
+local Players   = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
-local StringLower  = string.lower
-local StringUpper  = string.upper
-local StringFind   = string.find
-local StringMatch  = string.match
-local StringSplit  = string.split
-local StringFormat = string.format
-local TableInsert  = table.insert
-local TableConcat  = table.concat
-local TableFind    = table.find
-local TableSort    = table.sort
-local MathRandom   = math.random
-local MathHuge     = math.huge
-local OsClock      = os.clock
-local VectorCreate    = vector.create
-local VectorMagnitude = vector.magnitude
+-- Cache stdlib (avoids repeated global lookups in hot loops)
+local StrLower  = string.lower
+local StrUpper  = string.upper
+local StrFind   = string.find
+local StrMatch  = string.match
+local StrFormat = string.format
+local TblInsert = table.insert
+local TblSort   = table.sort
+local MathRand  = math.random
+local MathHuge  = math.huge
+local Clock     = os.clock
+local VecCreate = vector.create
+local VecMag    = vector.magnitude
 
 local player = Players.LocalPlayer
+
+-- ==========================================
+-- UTILS
+-- ==========================================
 
 local function notify(text: string)
     send_notification(text, "info")
 end
 
--- ==========================================
--- DYNAMIC KEY MAPPING & UTILS
--- ==========================================
-local KEY_MAP = {
-    ["Tab"] = 0x09, ["Q"] = 0x51, ["E"] = 0x45, ["R"] = 0x52, ["T"] = 0x54,
-    ["F"] = 0x46, ["G"] = 0x47, ["Z"] = 0x5A, ["X"] = 0x58,
-    ["C"] = 0x43, ["V"] = 0x56, ["B"] = 0x42
+local KEY_MAP: {[string]: number} = {
+    ["Tab"] = 0x09, ["Q"] = 0x51, ["E"] = 0x45, ["R"] = 0x52,
+    ["T"] = 0x54,  ["F"] = 0x46, ["G"] = 0x47, ["Z"] = 0x5A,
+    ["X"] = 0x58,  ["C"] = 0x43, ["V"] = 0x56, ["B"] = 0x42
 }
-local ALL_KEYS = {"Tab", "Q", "E", "R", "T", "F", "G", "Z", "X", "C", "V", "B"}
+local ALL_KEYS = {"Tab","Q","E","R","T","F","G","Z","X","C","V","B"}
 
-local function trim(s: string?): string
-    return if s then StringMatch(s, "^%s*(.-)%s*$") or "" else ""
-end
-
-local function cleanKey(key): string
+local function cleanKey(key: any): string
     if not key then return "Q" end
-    local upperKey = StringUpper(tostring(key))
-  
-    if upperKey == "TAB" then return "Tab" end
-    return upperKey
+    local u = StrUpper(tostring(key))
+    return if u == "TAB" then "Tab" else u
 end
 
--- ==========================================
--- FIXED: Single-thread sequenced input fire
--- ==========================================
+local function normalizePosition(s: any): string
+    if type(s) ~= "string" then return "Above" end
+    local l = StrLower(s)
+    if l == "above"   then return "Above"
+    elseif l == "below"   then return "Below"
+    elseif l == "behind"  then return "Behind"
+    elseif l == "random"  then return "Random"
+    elseif l == "up & down" or l == "up&down" or l == "updown" then return "Up & down"
+    end
+    return "Above"
+end
+
+-- Fires an attack combo: M1 then all configured ability keys
 local function fireAttack(attackKeys: {number})
+    if #attackKeys == 0 then return end
     mouse1press()
     task.wait(0.05)
     mouse1release()
     for _, k in attackKeys do
         keypress(k)
-        task.wait(0.01 + MathRandom() * 0.01)
+        task.wait(0.01 + MathRand() * 0.01)
         keyrelease(k)
     end
 end
 
 -- ==========================================
--- POSITION NORMALISER
--- Accepts any casing: "above" / "ABOVE" / "Above" all work.
+-- CONFIGURATION (from _G.Settings)
 -- ==========================================
-local function normalizePosition(s: string): string
-    if type(s) ~= "string" then return "Above" end
-    local low = string.lower(s)
-    if low == "above"            then return "Above"
-    elseif low == "below"        then return "Below"
-    elseif low == "behind"       then return "Behind"
-    elseif low == "random"       then return "Random"
-    elseif low == "up & down" or low == "up&down" or low == "updown" then return "Up & down"
-    end
-    return "Above" -- safe fallback
+
+local cfg = (type(_G.Settings) == "table" and _G.Settings) or {}
+local cfgAr = cfg.autoraid or {}
+local cfgKb = cfg.keybinds or {}
+local cfgAf = cfg.autofarm or {}
+
+local rawSummonStr  = cfgKb.summon or "Q"
+local rawAttackStrs = cfgKb.attack or {"E","R","Z","X","C","V"}
+
+local Config = {
+    HitPosition       = cfgAf.position or cfgAr.position or "Above",
+    OffsetDistance    = cfgAf.distance or cfgAr.distance or 10,
+    RandomSwitchSpeed = cfgAf.speed    or cfgAr.speed    or 2,
+    SummonKeyStr      = cleanKey(rawSummonStr),
+    AttackKeyStrs     = (function()
+        local t = {}
+        for _, k in rawAttackStrs do TblInsert(t, cleanKey(k)) end
+        return t
+    end)(),
+    WhitelistedNames  = {} :: {string},
+    TargetPlayer      = "None",
+}
+
+-- ==========================================
+-- DERIVED KEY CODES
+-- ==========================================
+
+local SUMMON_KEY = KEY_MAP[Config.SummonKeyStr] or 0x51
+local ATTACK_KEYS: {number} = {}
+for _, s in Config.AttackKeyStrs do
+    if KEY_MAP[s] then TblInsert(ATTACK_KEYS, KEY_MAP[s]) end
 end
 
--- ==============================================================================
--- AUTO RAID ENGINE (Triggered via _G.Settings.autoraid)
--- Kill switch: press / (0xBF) to pause/resume mid-raid.
--- ==============================================================================
-local isHeadless = false
-if _G.Settings and type(_G.Settings) == "table" and _G.Settings.autoraid then
-    if _G.Settings.autoraid.Enabled == true then
-        isHeadless = true
+local E_KEY   = 0x45
+local A_KEY   = 0x41
+local D_KEY   = 0x44
+local ONE_KEY = 0x31
+
+-- ==========================================
+-- SHARED RUNTIME STATE
+-- ==========================================
+
+local isLobbyFarmOn = false
+local isConjFarmOn  = false
+local isMobFarmOn   = false
+
+local hitPosition       = normalizePosition(Config.HitPosition)
+local currentRandMode   = "Above"
+local lastRandChange    = 0
+local OFFSET_DISTANCE   = Config.OffsetDistance
+local RAND_SWITCH_SPEED = Config.RandomSwitchSpeed
+
+local MIN_Y_LEVEL   = -150
+local MAX_DISTANCE  = 2500
+local selectedMob   = "None"
+local selectedPlrTarget = Config.TargetPlayer
+
+-- Summon / attack shared guards
+local lastSummonTime = 0
+local isAttacking    = false
+
+-- Dio dodge state (shared between UI and headless modes)
+local dioAbilityDetected = false
+local dioAbilityTime     = 0
+local dioAbilityLogged   = false
+
+-- ==========================================
+-- WHITELIST (set for O(1) lookup)
+-- ==========================================
+
+local whitelistSet: {[string]: boolean} = {}
+
+local function rebuildWhitelistSet()
+    whitelistSet = {}
+    for _, name in Config.WhitelistedNames do
+        if name ~= "" then whitelistSet[StrLower(name)] = true end
     end
 end
 
-if isHeadless then
+local function isWhitelisted(entity: Model?): boolean
+    if not entity then return false end
+    if whitelistSet[StrLower(entity.Name)] then return true end
+    for _, p in Players:GetChildren() do
+        if p:IsA("Player") and p.Character == entity then
+            if whitelistSet[StrLower(p.Name)] or whitelistSet[StrLower(p.DisplayName)] then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- ==========================================
+-- SHARED COMBAT HELPERS
+-- ==========================================
+
+local function isStandOut(char: Model?): boolean
+    if not char then return false end
+    local a = char:GetAttribute("SummonedStand")
+    return a ~= nil and a ~= "" and a ~= false
+end
+
+local function forceSummon()
+    keypress(SUMMON_KEY)
+    task.wait(0.1 + MathRand() * 0.05)
+    keyrelease(SUMMON_KEY)
+    lastSummonTime = Clock()
+end
+
+local function checkDioAbility(): boolean
+    local effects = Workspace:FindFirstChild("Effects")
+    if not effects then return false end
+    if effects:FindFirstChild("BigBlackHole") then return true end
+    local slashi = effects:FindFirstChild("Slashi")
+    return slashi ~= nil and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") ~= nil
+end
+
+-- Returns the CFrame the player's HRP should be set to for attacking targetRoot.
+-- Handles Random / Up & down cycling and Dio ability dodge.
+local function calculateTargetCFrame(targetRoot: BasePart): CFrame
+    local pos  = targetRoot.Position
+    local look = targetRoot.CFrame.LookVector
+    local mode = hitPosition
+
+    -- Cycle modes
+    if mode == "Random" then
+        if Clock() - lastRandChange > RAND_SWITCH_SPEED then
+            local pool = {"Above","Below","Behind"}
+            currentRandMode = pool[MathRand(1, 3)]
+            lastRandChange  = Clock()
+        end
+        mode = currentRandMode
+    elseif mode == "Up & down" then
+        if Clock() - lastRandChange > RAND_SWITCH_SPEED then
+            currentRandMode = if currentRandMode == "Above" then "Below" else "Above"
+            lastRandChange  = Clock()
+        end
+        mode = currentRandMode
+    end
+
+    -- Dio ability dodge tracking
+    local abilityActive = checkDioAbility()
+    if abilityActive then
+        if not dioAbilityDetected then
+            dioAbilityDetected = true
+            dioAbilityTime     = Clock()
+            print("[BZL Hub]: Dio Ability Detected — waiting 2s before dodge.")
+        end
+    else
+        if dioAbilityDetected then
+            print("[BZL Hub]: Dio Ability gone — resetting dodge.")
+        end
+        dioAbilityDetected = false
+        dioAbilityLogged   = false
+    end
+
+    -- Flip position after 2s sustained ability
+    if dioAbilityDetected and (Clock() - dioAbilityTime >= 2) then
+        if not dioAbilityLogged then
+            print("[BZL Hub]: Dodging!")
+            dioAbilityLogged = true
+        end
+        if mode == "Above"  then mode = "Below"
+        elseif mode == "Below"  then mode = "Above"
+        elseif mode == "Behind" then mode = "Above"
+        elseif mode == "Middle" then mode = "Below"
+        end
+    end
+
+    if mode == "Below"  then return CFrame.lookAt(pos + VecCreate(0, -OFFSET_DISTANCE, 0), pos)
+    elseif mode == "Behind" then return CFrame.lookAt(pos - look * OFFSET_DISTANCE, pos)
+    elseif mode == "Middle" then return CFrame.lookAt(pos + look * 2.5, pos)
+    end
+    -- Default: Above
+    return CFrame.lookAt(pos + VecCreate(0, OFFSET_DISTANCE, 0), pos)
+end
+
+-- ==========================================
+-- DATA FETCHERS
+-- ==========================================
+
+local function getGroupedMobs(): {string}
+    local counts: {[string]: number} = {}
+    local order:  {string} = {}
+    local lf = Workspace:FindFirstChild("Live")
+    if lf then
+        for _, v in lf:GetChildren() do
+            if not (v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= player.Character) then continue end
+            local isRealPlayer = false
+            for _, p in Players:GetChildren() do
+                if p:IsA("Player") and p.Character == v then isRealPlayer = true; break end
+            end
+            if isRealPlayer then continue end
+
+            -- Strip trailing random suffix (6+ alphanumeric chars) to get base name
+            local base = StrMatch(v.Name, "^(.-)%s*[%w]+$") or v.Name
+            if base == "" then base = v.Name end
+
+            if not counts[base] then
+                counts[base] = 0
+                TblInsert(order, base)
+            end
+            counts[base] += 1
+        end
+    end
+
+    local result: {string} = {}
+    for _, base in order do
+        local c = counts[base]
+        TblInsert(result, if c > 1 then StrFormat("%s (%d)", base, c) else base)
+    end
+    TblSort(result)
+    TblInsert(result, 1, "None")
+
+    if selectedMob ~= "None" and selectedMob ~= "" then
+        local found = false
+        for _, m in result do if m == selectedMob then found = true; break end end
+        if not found then TblInsert(result, 2, selectedMob) end
+    end
+    return result
+end
+
+local function getPlayerNames(): {string}
+    local list: {string} = {}
+    for _, p in Players:GetChildren() do
+        if p:IsA("Player") and p ~= player then TblInsert(list, p.Name) end
+    end
+    TblSort(list)
+    TblInsert(list, 1, "None")
+
+    if selectedPlrTarget ~= "None" and selectedPlrTarget ~= "" then
+        local found = false
+        for _, n in list do if n == selectedPlrTarget then found = true; break end end
+        if not found then TblInsert(list, 2, selectedPlrTarget) end
+    end
+    return list
+end
+
+-- ==========================================
+-- HEADLESS AUTO RAID (runs when _G.Settings.autoraid.Enabled == true)
+-- ==========================================
+
+if cfgAr.Enabled == true then
     print("[BZL Hub]: autoraid Detected. Running Auto Raid Engine.")
     notify("Auto Raid started! Press / to pause/resume.")
 
-    local cfg = _G.Settings
-    local hitPosition = normalizePosition(cfg.autoraid.position or "Above")
-    local RANDOM_SWITCH_SPEED = cfg.autoraid.speed or 1
-    local OFFSET_DISTANCE = cfg.autoraid.distance or 10
+    local arHitPos      = normalizePosition(cfgAr.position or "Above")
+    local arOffset      = cfgAr.distance or 10
+    local arSwitchSpeed = cfgAr.speed    or 1
+    local arSummonKey   = KEY_MAP[cleanKey(rawSummonStr)] or SUMMON_KEY
+    local arAttackKeys  = ATTACK_KEYS  -- re-use already-built table
 
-    local rawSummonStr = cfg.keybinds and cfg.keybinds.summon or "Q"
-    local rawAttackStrs = cfg.keybinds and cfg.keybinds.attack or {"E", "R", "Z", "X", "C", "V"}
+    local arCurrentMode  = "Above"
+    local arLastChange   = 0
+    local arLastSummon   = 0
+    local arLastKnownChar: Model? = nil
+    local arAttacking    = false
+    local arActive       = true
 
-    local summonKeyStr = cleanKey(rawSummonStr)
-    local attackKeyStrs = {}
-    for _, k in rawAttackStrs do TableInsert(attackKeyStrs, cleanKey(k)) end
+    -- Separate dodge state for headless
+    local arDioDetected = false
+    local arDioTime     = 0
+    local arDioLogged   = false
 
-    local SUMMON_KEY = KEY_MAP[summonKeyStr] or 0x51
-    local ATTACK_KEYS = {}
-    for _, str in attackKeyStrs do
-        if KEY_MAP[str] then TableInsert(ATTACK_KEYS, KEY_MAP[str]) end
-    end
-
-    local currentRandomMode = "Above"
-    local lastRandomChange = 0
-    local lastSummonTime = 0
-    local isAttacking = false
-    local lastKnownChar = nil
-    local raidActive = true          -- Kill switch state
-    local KILL_SWITCH_KEY = 0xBF     -- Virtual key code for /
-    local killSwitchDebounce = false
-
-    local MIN_Y_LEVEL = -150
-    local MAX_DISTANCE = 2500
-
-    local dioHeadlessAbilityDetected = false
-    local dioHeadlessAbilityTime = 0
-    local loggedHeadlessDodge = false
-
-    -- ==========================================
-    -- KILL SWITCH: press / to toggle raid on/off
-    -- ==========================================
+    -- Kill switch: / key
     task.spawn(function()
+        local debounce = false
         while true do
             task.wait(0.1)
-            local pressed = getpressedkeys()
             local slashHeld = false
-            for _, k in pressed do
+            for _, k in getpressedkeys() do
                 if k == "Slash" then slashHeld = true; break end
             end
-            if slashHeld and not killSwitchDebounce then
-                killSwitchDebounce = true
-                raidActive = not raidActive
-                if raidActive then
+            if slashHeld and not debounce then
+                debounce = true
+                arActive = not arActive
+                if arActive then
                     print("[BZL Hub]: Auto Raid RESUMED.")
                     notify("Auto Raid resumed!")
                 else
@@ -150,146 +358,104 @@ if isHeadless then
                     notify("Auto Raid paused!")
                 end
                 task.wait(0.4)
-                killSwitchDebounce = false
+                debounce = false
             end
         end
     end)
 
-    local function isStandOut(c)
-        if not c then return false end
-        local a = c:GetAttribute("SummonedStand")
-        return (a and a ~= "" and a ~= false)
-    end
-
-    local function forceSummon()
-        keypress(SUMMON_KEY)
-        task.wait(0.1 + (MathRandom() * 0.05))
-        keyrelease(SUMMON_KEY)
-        lastSummonTime = OsClock()
-    end
-
-    -- ==========================================
-    -- STAND DESPAWN WATCHER
-    -- ==========================================
-    local wasStandOut = false
+    -- Stand despawn watcher
     task.spawn(function()
+        local wasOut = false
         while true do
             task.wait(0.5)
-            if not raidActive then continue end
+            if not arActive then continue end
             local c = player.Character
-            if not c then wasStandOut = false; continue end
-            local standNow = isStandOut(c)
-            if wasStandOut and not standNow then
+            if not c then wasOut = false; continue end
+            local out = isStandOut(c)
+            if wasOut and not out then
                 print("[BZL Hub]: Stand despawned — re-summoning.")
                 notify("Stand despawned! Re-summoning...")
+                keypress(arSummonKey); task.wait(0.15); keyrelease(arSummonKey)
+                arLastSummon = Clock()
             end
-            wasStandOut = standNow
+            wasOut = out
         end
     end)
 
-    -- ==========================================
-    -- DEATH WATCHER
-    -- ==========================================
-    local lastCharForDeath = nil
+    -- Death watcher
     task.spawn(function()
+        local lastChar: Model? = nil
         while true do
             task.wait(0.3)
-            if not raidActive then continue end
+            if not arActive then continue end
             local c = player.Character
             if not c then
-                if lastCharForDeath then
+                if lastChar then
                     print("[BZL Hub]: Character died / respawning.")
                     notify("You died! Waiting for respawn...")
-                    lastCharForDeath = nil
+                    lastChar = nil
                 end
                 continue
             end
             local hum = c:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health <= 0 and lastCharForDeath == c then
+            if hum and hum.Health <= 0 and lastChar == c then
                 print("[BZL Hub]: Character health reached 0.")
                 notify("You died!")
-                lastCharForDeath = nil
+                lastChar = nil
             elseif hum and hum.Health > 0 then
-                lastCharForDeath = c
+                lastChar = c
             end
         end
     end)
 
-    -- ==========================================
-    -- AUTO-RETRY WATCHER
-    -- ==========================================
+    -- Lobby / retry loop
     task.spawn(function()
-        local PLAY_SCALE_X = 0.5213541666666667
-        local PLAY_SCALE_Y = 0.6333002973240832
-        local TOPBAR_OFFSET = 36
+        local PLAY_X  = 0.5213541666666667
+        local PLAY_Y  = 0.6333002973240832
+        local RETRY_X = 0.5494791666666666
+        local RETRY_Y = 0.6950
+        local TOPBAR  = 36
 
-        local function clickAtScale(scaleX, scaleY)
-            local camera = Workspace.CurrentCamera
-            if not camera then return end
-            local viewport = camera.ViewportSize
-            local absX = viewport.X * scaleX
-            local absY = (viewport.Y * scaleY) + TOPBAR_OFFSET
-            mousemoveabs(absX + MathRandom(-3, 3), absY + MathRandom(-3, 3))
-            task.wait(0.05 + (MathRandom() * 0.05))
-            mouse1press()
-            task.wait(0.05)
-            mouse1release()
+        local function clickAtScale(sx: number, sy: number)
+            local cam = Workspace.CurrentCamera
+            if not cam then return end
+            local vp = cam.ViewportSize
+            mousemoveabs(vp.X * sx + MathRand(-3, 3), vp.Y * sy + TOPBAR + MathRand(-3, 3))
+            task.wait(0.05 + MathRand() * 0.05)
+            mouse1press(); task.wait(0.05); mouse1release()
         end
 
         local emptyTimer = 0
-        local everSawBoss = false
-
         while true do
             task.wait(0.5)
-            if not raidActive then continue end
-            local c = player.Character
+            if not arActive then continue end
+            local c   = player.Character
             local hum = c and c:FindFirstChildOfClass("Humanoid")
-            local inGame = c and c:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0
+            local alive = c and c:FindFirstChild("HumanoidRootPart") and hum and hum.Health > 0
 
-            if not inGame then
+            if not alive then
                 emptyTimer = 0
-                everSawBoss = false
-                clickAtScale(PLAY_SCALE_X, PLAY_SCALE_Y)
+                clickAtScale(PLAY_X, PLAY_Y)
             else
-                local lf = Workspace:FindFirstChild("Live")
+                local lf      = Workspace:FindFirstChild("Live")
                 local hasMobs = false
                 if lf then
                     for _, v in lf:GetChildren() do
-                        if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
-                            local name = StringLower(v.Name)
-                            -- STRICT CHECK: Must perfectly match the attack logic target criteria
-                            if StringFind(name, ".", 1, true) == 1 then
-                                if not (StringFind(name, "hostage", 1, true) or StringFind(name, "citizen", 1, true) or StringFind(name, "server", 1, true)) then
-                                    local mh = v:FindFirstChildOfClass("Humanoid")
-                                    if mh and mh.Health > 0 then
-                                        hasMobs = true
-                                        everSawBoss = true
-                                        break
-                                    end
-                                end
-                            end
-                        end
+                        if not (v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c) then continue end
+                        local n = StrLower(v.Name)
+                        if StrFind(n, "hostage", 1, true) or StrFind(n, "citizen", 1, true) or StrFind(n, "server", 1, true) then continue end
+                        local mh = v:FindFirstChildOfClass("Humanoid")
+                        if mh and mh.Health > 0 then hasMobs = true; break end
                     end
                 end
-                
+
                 if not hasMobs then
-                    if everSawBoss then
-                        if emptyTimer == 0 then
-                            emptyTimer = OsClock()
-                            print("[BZL Hub] HEADLESS: Dio is dead! Waiting for Retry UI...")
-                        else
-                            local timeLeft = 4 - (OsClock() - emptyTimer)
-                            if timeLeft <= 0 then
-                                print("[BZL Hub] HEADLESS: Clicking Retry Button!")
-                                -- Clicking broader coordinates aligned with the right side (Green Retry Button)
-                                clickAtScale(0.55, 0.69)
-                                task.wait(0.1)
-                                clickAtScale(0.60, 0.69)
-                                task.wait(4)
-                                emptyTimer = 0
-                                everSawBoss = false
-                            end
-                        end
+                    if emptyTimer == 0 then
+                        emptyTimer = Clock()
+                    elseif Clock() - emptyTimer >= 2.5 then
+                        clickAtScale(RETRY_X, RETRY_Y)
+                        task.wait(4)
+                        emptyTimer = 0
                     end
                 else
                     emptyTimer = 0
@@ -298,325 +464,127 @@ if isHeadless then
         end
     end)
 
+    -- Main attack loop
     task.spawn(function()
         while true do
             task.wait(0.05)
-            if not raidActive then continue end
+            if not arActive then continue end
             local c = player.Character
             if not c then continue end
-            local root = c:FindFirstChild("HumanoidRootPart")
-            local hum = c:FindFirstChildOfClass("Humanoid")
+            local root = c:FindFirstChild("HumanoidRootPart") :: BasePart?
+            local hum  = c:FindFirstChildOfClass("Humanoid")
             if not root or not hum or hum.Health <= 0 then continue end
 
-            if c ~= lastKnownChar then
-                lastKnownChar = c
+            if c ~= arLastKnownChar then
+                arLastKnownChar = c
                 task.wait(2.5)
-                forceSummon()
+                keypress(arSummonKey); task.wait(0.15); keyrelease(arSummonKey)
+                arLastSummon = Clock()
+                continue
             end
 
-            if not isStandOut(c) and (OsClock() - lastSummonTime) > 3 then
-                forceSummon()
+            if not isStandOut(c) and Clock() - arLastSummon > 3 then
+                keypress(arSummonKey); task.wait(0.15); keyrelease(arSummonKey)
+                arLastSummon = Clock()
             end
 
             local lf = Workspace:FindFirstChild("Live")
-            if lf then
-                local closestTarget = nil
-                local minDistance = MathHuge
-                local myPos = root.Position
+            if not lf then continue end
 
-                for _, v in lf:GetChildren() do
-                    if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c then
-                        local name = StringLower(v.Name)
-                        if StringFind(name, ".", 1, true) == 1 then
-                            if not (StringFind(name, "hostage", 1, true) or StringFind(name, "citizen", 1, true) or StringFind(name, "server", 1, true)) then
-                                local mh = v:FindFirstChildOfClass("Humanoid")
-                                if mh and mh.Health > 0 then
-                                    local hrp = v.HumanoidRootPart
-                                    local tPos = hrp.Position
-                                    if tPos.Y >= MIN_Y_LEVEL then
-                                        local dist = VectorMagnitude(myPos - tPos)
-                                        if dist < minDistance and dist < MAX_DISTANCE then
-                                            minDistance = dist
-                                            closestTarget = hrp
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
+            local best: BasePart? = nil
+            local bestDist = MathHuge
+            local myPos = root.Position
+
+            for _, v in lf:GetChildren() do
+                if not (v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= c) then continue end
+                local n = StrLower(v.Name)
+                -- Headless targets mobs starting with "."
+                if not StrFind(n, ".", 1, true) then continue end
+                if StrFind(n, "hostage", 1, true) or StrFind(n, "citizen", 1, true) or StrFind(n, "server", 1, true) then continue end
+                local mh = v:FindFirstChildOfClass("Humanoid")
+                if not (mh and mh.Health > 0) then continue end
+                local hrp = v.HumanoidRootPart :: BasePart
+                if hrp.Position.Y < MIN_Y_LEVEL then continue end
+                local d = VecMag(myPos - hrp.Position)
+                if d < bestDist and d < MAX_DISTANCE then bestDist = d; best = hrp end
+            end
+
+            if not best then continue end
+
+            -- Headless-local Dio dodge
+            local abilityOn = checkDioAbility()
+            if abilityOn then
+                if not arDioDetected then
+                    arDioDetected = true; arDioTime = Clock()
+                    print("[BZL Hub] HEADLESS: Dio Ability Detected — waiting 2s.")
                 end
+            else
+                if arDioDetected then print("[BZL Hub] HEADLESS: Dio Ability gone.") end
+                arDioDetected = false; arDioLogged = false
+            end
 
-                if closestTarget then
-                    local pos = closestTarget.Position
-                    local look = closestTarget.CFrame.LookVector
-                    local mode = hitPosition
-
-                    if mode == "Random" then
-                        if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
-                            local modes = {"Above", "Below", "Behind"}
-                            currentRandomMode = modes[MathRandom(1, 3)]
-                            lastRandomChange = OsClock()
-                        end
-                        mode = currentRandomMode
-                    elseif mode == "Up & down" then
-                        if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
-                            if currentRandomMode == "Above" then currentRandomMode = "Below" else currentRandomMode = "Above" end
-                            lastRandomChange = OsClock()
-                        end
-                        mode = currentRandomMode
-                    end
-
-                    -- ==========================================
-                    -- DIO DODGE OVERRIDE
-                    -- ==========================================
-                    local effects = Workspace:FindFirstChild("Effects")
-                    local abilityActive = false
-                    
-                    if effects then
-                        if effects:FindFirstChild("BigBlackHole") then 
-                            abilityActive = true 
-                        end
-                        local slashi = effects:FindFirstChild("Slashi")
-                        if slashi and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") then
-                            abilityActive = true
-                        end
-                    end
-
-                    if abilityActive then
-                        if not dioHeadlessAbilityDetected then
-                            dioHeadlessAbilityDetected = true
-                            dioHeadlessAbilityTime = OsClock()
-                            print("[BZL Hub] HEADLESS: Dio Ability Detected! Waiting 2 seconds.")
-                        end
-                    else
-                        if dioHeadlessAbilityDetected then
-                            print("[BZL Hub] HEADLESS: Dio Ability Despawned. Resetting.")
-                        end
-                        dioHeadlessAbilityDetected = false
-                        loggedHeadlessDodge = false
-                    end
-
-                    local dodging = false
-                    if dioHeadlessAbilityDetected and (OsClock() - dioHeadlessAbilityTime >= 2) then
-                        dodging = true
-                        if not loggedHeadlessDodge then
-                            print("[BZL Hub] HEADLESS: 2 Seconds passed. Dodging!")
-                            loggedHeadlessDodge = true
-                        end
-                    end
-
-                    if dodging then
-                        if mode == "Above" then mode = "Below"
-                        elseif mode == "Below" then mode = "Above"
-                        elseif mode == "Behind" then mode = "Above"
-                        elseif mode == "Middle" then mode = "Below"
-                        end
-                    end
-
-                    if mode == "Above" then root.CFrame = CFrame.lookAt(pos + VectorCreate(0, OFFSET_DISTANCE, 0), pos)
-                    elseif mode == "Below" then root.CFrame = CFrame.lookAt(pos + VectorCreate(0, -OFFSET_DISTANCE, 0), pos)
-                    elseif mode == "Behind" then root.CFrame = CFrame.lookAt(pos - (look * OFFSET_DISTANCE), pos)
-                    else root.CFrame = CFrame.lookAt(pos + VectorCreate(0, OFFSET_DISTANCE, 0), pos) end
-
-                    if not isAttacking then
-                        isAttacking = true
-                        task.spawn(function()
-                            fireAttack(ATTACK_KEYS)
-                            isAttacking = false
-                        end)
-                    end
+            local mode = arHitPos
+            if mode == "Random" then
+                if Clock() - arLastChange > arSwitchSpeed then
+                    local pool = {"Above","Below","Behind"}
+                    arCurrentMode = pool[MathRand(1,3)]; arLastChange = Clock()
                 end
+                mode = arCurrentMode
+            elseif mode == "Up & down" then
+                if Clock() - arLastChange > arSwitchSpeed then
+                    arCurrentMode = if arCurrentMode == "Above" then "Below" else "Above"
+                    arLastChange  = Clock()
+                end
+                mode = arCurrentMode
+            end
+
+            if arDioDetected and Clock() - arDioTime >= 2 then
+                if not arDioLogged then print("[BZL Hub] HEADLESS: Dodging!"); arDioLogged = true end
+                if mode == "Above" or mode == "Behind" then mode = "Below"
+                elseif mode == "Below" then mode = "Above" end
+            end
+
+            local pos  = best.Position
+            local look = best.CFrame.LookVector
+            if mode == "Below"  then root.CFrame = CFrame.lookAt(pos + VecCreate(0, -arOffset, 0), pos)
+            elseif mode == "Behind" then root.CFrame = CFrame.lookAt(pos - look * arOffset, pos)
+            else root.CFrame = CFrame.lookAt(pos + VecCreate(0, arOffset, 0), pos) end
+
+            if not arAttacking then
+                arAttacking = true
+                task.spawn(function() fireAttack(arAttackKeys); arAttacking = false end)
             end
         end
     end)
 
-    return
+    return  -- Don't load UI in headless mode
 end
 
 -- ==============================================================================
--- BIZARRE LINEAGE HUB
+-- UI MODE
 -- ==============================================================================
 
-local rawUiSummonStr = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.summon) or "Q"
-local rawUiAttackStrs = (_G.Settings and _G.Settings.keybinds and _G.Settings.keybinds.attack) or {"E", "R", "Z", "X", "C", "V"}
-
-local cleanedUiAttackStrs = {}
-for _, k in rawUiAttackStrs do TableInsert(cleanedUiAttackStrs, cleanKey(k)) end
-
-local Config = {
-    HitPosition = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.position) or "Above",
-    OffsetDistance = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.distance) or 10,
-    RandomSwitchSpeed = (_G.Settings and _G.Settings.autofarm and _G.Settings.autofarm.speed) or 2,
-    SummonKeyStr = cleanKey(rawUiSummonStr),
-    AttackKeyStrs = cleanedUiAttackStrs,
-    WhitelistedNames = {},
-    TargetPlayer = "None"
-}
-
-if not Config.RandomSwitchSpeed then Config.RandomSwitchSpeed = 2 end
-if not Config.WhitelistedNames then Config.WhitelistedNames = {} end
-if not Config.TargetPlayer then Config.TargetPlayer = "None" end
-
--- ==========================================
--- GLOBAL HUB STATE
--- ==========================================
-local isLobbyFarmOn = false
-local isConjFarmOn = false
-local isMobFarmOn = false
-
-local hitPosition = normalizePosition(Config.HitPosition)
-local currentRandomMode = "Above"
-local lastRandomChange = 0
-local OFFSET_DISTANCE = Config.OffsetDistance
-local RANDOM_SWITCH_SPEED = Config.RandomSwitchSpeed
-
-local MIN_Y_LEVEL = -150
-local MAX_DISTANCE = 2500
-local selectedMob = "None"
-local selectedPlayerTarget = Config.TargetPlayer or "None"
-
-local E_KEY = 0x45
-local A_KEY = 0x41
-local D_KEY = 0x44
-local ONE_KEY = 0x31
-
-local SUMMON_KEY = KEY_MAP[Config.SummonKeyStr] or 0x51
-local ATTACK_KEYS = {}
-for _, str in Config.AttackKeyStrs do
-    if KEY_MAP[str] then TableInsert(ATTACK_KEYS, KEY_MAP[str]) end
-end
-
-local lastSummonTime = 0
-local isAttacking = false
-
-local dioUiAbilityDetected = false
-local dioUiAbilityTime = 0
-local loggedUiDodge = false
-
-local function isWhitelisted(entity)
-    if not entity then return false end
-    local entName = StringLower(entity.Name)
-
-    for _, wName in Config.WhitelistedNames do
-        if wName == "" then continue end
-        local lowerW = StringLower(wName)
-
-        if entName == lowerW then return true end
-
-        for _, p in Players:GetChildren() do
-            if p:IsA("Player") then
-                if StringLower(p.Name) == lowerW or StringLower(p.DisplayName) == lowerW then
-                    if p.Character == entity or entName == StringLower(p.Name) or entName == StringLower(p.DisplayName) then
-                        return true
-                    end
-                end
-            end
-        end
-    end
-    return false
-end
-
--- ==========================================
--- DATA FETCHERS
--- ==========================================
-local function getGroupedMobs()
-    local counts = {}
-    local bases = {}
-    local liveFolder = Workspace:FindFirstChild("Live")
-
-    if liveFolder then
-        for _, v in liveFolder:GetChildren() do
-            if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= player.Character then
-                local isRealPlayer = false
-                for _, p in Players:GetChildren() do
-                    if p:IsA("Player") and p.Character == v then
-                        isRealPlayer = true
-                        break
-                    end
-                end
-                if isRealPlayer then continue end
-
-                local rawName = tostring(v.Name)
-                local baseName = StringMatch(rawName, "^(.-)%w%w%w%w%w%w$")
-                if not baseName or baseName == "" then baseName = rawName end
-
-                if not counts[baseName] then
-                    counts[baseName] = 0
-                    TableInsert(bases, baseName)
-                end
-                counts[baseName] = counts[baseName] + 1
-            end
-        end
-    end
-
-    local newMobs = {}
-    for _, base in bases do
-        local count = counts[base]
-        if count > 1 then
-            TableInsert(newMobs, base .. " (" .. count .. ")")
-        else
-            TableInsert(newMobs, base)
-        end
-    end
-
-    TableSort(newMobs)
-    TableInsert(newMobs, 1, "None")
-
-    local found = false
-    for _, m in newMobs do
-        if m == selectedMob then found = true; break end
-    end
-    if selectedMob ~= "None" and selectedMob ~= "" and not found then
-        TableInsert(newMobs, 2, selectedMob)
-    end
-    return newMobs
-end
-
-local function getPlayerNames()
-    local list = {}
-    for _, p in Players:GetChildren() do
-        if p:IsA("Player") and p ~= player then
-            TableInsert(list, p.Name)
-        end
-    end
-    TableSort(list)
-    TableInsert(list, 1, "None")
-
-    local found = false
-    for _, n in list do
-        if n == selectedPlayerTarget then found = true; break end
-    end
-    if selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "" and not found then
-        TableInsert(list, 2, selectedPlayerTarget)
-    end
-    return list
-end
-
--- ==========================================
--- UI INITIALIZATION (OK's UI Library)
--- ==========================================
-local severeui = loadstring(game:HttpGet("https://raw.githubusercontent.com/okdude42/ui-lib/refs/heads/main/SevereLib.lua"))()
+local severeui = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/okdude42/ui-lib/refs/heads/main/SevereLib.lua"
+))()
 
 local window = severeui:createwindow({
-    Title = "Bizarre Lineage Hub",
-    Version = "v1",
-    Keybind = "RightShift",
-    ConfigFolder = "BZLHub",
-    DefaultTab = "Randomized",
-    TabAlignment = "Center",
-    DefaultColor = Color3.fromRGB(18, 18, 18),
-    DefaultAccent = Color3.fromRGB(220, 20, 20),
+    Title           = "Bizarre Lineage Hub",
+    Version         = "v1",
+    Keybind         = "RightShift",
+    ConfigFolder    = "BZLHub",
+    DefaultTab      = "Randomized",
+    TabAlignment    = "Center",
+    DefaultColor    = Color3.fromRGB(18, 18, 18),
+    DefaultAccent   = Color3.fromRGB(220, 20, 20),
     DefaultSnowfall = false,
-    DefaultScale = 1.0,
-    DefaultFont = 5,
-    ReloadCallback = function()
+    DefaultScale    = 1.0,
+    DefaultFont     = 5,
+    ReloadCallback  = function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/lafl4me/severe/refs/heads/main/amogus.txt"))()
     end
 })
 
--- ==========================================
--- CREATE TABS
--- ==========================================
 local lobbyTab  = window:createtab("Randomized")
 local mobTab    = window:createtab("Target")
 local combatTab = window:createtab("Farm Setup")
@@ -629,135 +597,127 @@ local tpTab     = window:createtab("Teleports")
 window:createlabel(lobbyTab, "RANDOMIZED KILLING", 1)
 
 window:createtoggle(lobbyTab, {
-    Name = "Enable Autofarm",
-    Col = 1,
-    Default = false,
+    Name     = "Enable Autofarm",
+    Col      = 1,
+    Default  = false,
     Callback = function(v)
         isLobbyFarmOn = v
-        if v then isConjFarmOn = false; isMobFarmOn = false end
+        if v then isMobFarmOn = false; isConjFarmOn = false end
     end
 })
 
 window:createseparator(lobbyTab, 1)
 window:createlabel(lobbyTab, "PLAYER WHITELIST", 1)
 
--- Whitelist: single-select dropdown — add/remove one player at a time
-local function getWhitelistItems()
-    local items = {}
-    local seen = {}
+local function getWhitelistDropItems(): {string}
+    local seen: {[string]: boolean} = {}
+    local items: {string} = {}
     for _, name in Config.WhitelistedNames do
         if name ~= "" and not seen[name] then
-            TableInsert(items, name)
-            seen[name] = true
+            TblInsert(items, name); seen[name] = true
         end
     end
     for _, p in Players:GetChildren() do
         if p:IsA("Player") and p ~= player and not seen[p.Name] then
-            TableInsert(items, p.Name)
-            seen[p.Name] = true
+            TblInsert(items, p.Name); seen[p.Name] = true
         end
     end
-    if #items == 0 then TableInsert(items, "None") end
+    if #items == 0 then TblInsert(items, "None") end
     return items
 end
 
-local wlSelectedPlayer = "None"
-local wlDropEl = window:createdropdown(lobbyTab, {
-    Name = "Whitelist Player",
-    Col = 1,
-    Options = getWhitelistItems(),
-    Default = "None",
-    Callback = function(val)
-        wlSelectedPlayer = val
-    end
+local wlSelected = "None"
+local wlDrop = window:createdropdown(lobbyTab, {
+    Name     = "Whitelist Player",
+    Col      = 1,
+    Options  = getWhitelistDropItems(),
+    Default  = "None",
+    Callback = function(v) wlSelected = v end
 })
 
 window:createbutton(lobbyTab, {
-    Name = "Add to Whitelist",
-    Col = 1,
-    Half = "Left",
-    SameRow = true,
+    Name     = "Add to Whitelist",
+    Col      = 1,
+    Half     = "Left",
+    SameRow  = true,
     Callback = function()
-        if wlSelectedPlayer == "None" or wlSelectedPlayer == "" then return end
-        local already = false
-        for _, n in Config.WhitelistedNames do if n == wlSelectedPlayer then already = true; break end end
-        if not already then
-            TableInsert(Config.WhitelistedNames, wlSelectedPlayer)
-            notify("Added " .. wlSelectedPlayer .. " to whitelist!")
-        else
-            notify(wlSelectedPlayer .. " is already whitelisted.")
-        end
-    end
-})
-
-window:createbutton(lobbyTab, {
-    Name = "Remove from WL",
-    Col = 1,
-    Half = "Right",
-    SameRow = false,
-    Callback = function()
-        if wlSelectedPlayer == "None" or wlSelectedPlayer == "" then return end
-        local newList = {}
+        if wlSelected == "None" or wlSelected == "" then return end
         for _, n in Config.WhitelistedNames do
-            if n ~= wlSelectedPlayer then TableInsert(newList, n) end
+            if n == wlSelected then notify(wlSelected .. " already whitelisted."); return end
         end
-        Config.WhitelistedNames = newList
-        notify("Removed " .. wlSelectedPlayer .. " from whitelist.")
+        TblInsert(Config.WhitelistedNames, wlSelected)
+        rebuildWhitelistSet()
+        notify("Added " .. wlSelected .. " to whitelist.")
     end
 })
 
 window:createbutton(lobbyTab, {
-    Name = "Refresh Player List",
-    Col = 1,
+    Name     = "Remove from WL",
+    Col      = 1,
+    Half     = "Right",
+    SameRow  = false,
     Callback = function()
-        wlDropEl.Options = getWhitelistItems()
+        if wlSelected == "None" or wlSelected == "" then return end
+        local new = {}
+        for _, n in Config.WhitelistedNames do
+            if n ~= wlSelected then TblInsert(new, n) end
+        end
+        Config.WhitelistedNames = new
+        rebuildWhitelistSet()
+        notify("Removed " .. wlSelected .. " from whitelist.")
+    end
+})
+
+window:createbutton(lobbyTab, {
+    Name     = "Refresh Player List",
+    Col      = 1,
+    Callback = function()
+        wlDrop.Options = getWhitelistDropItems()
         notify("Player list refreshed!")
     end
 })
 
 -- ==========================================
--- TAB: TARGET (Mob & Player)
+-- TAB: TARGET
 -- ==========================================
 window:createlabel(mobTab, "ENTITY SELECTION", 1)
 
-local mobDropEl = window:createdropdown(mobTab, {
-    Name = "Target NPC / Mob",
-    Col = 1,
-    Options = getGroupedMobs(),
-    Default = "None",
-    Callback = function(val)
-        selectedMob = val
-    end
+local mobDrop = window:createdropdown(mobTab, {
+    Name     = "Target NPC / Mob",
+    Col      = 1,
+    Options  = getGroupedMobs(),
+    Default  = "None",
+    Callback = function(v) selectedMob = v end
 })
 
 window:createbutton(mobTab, {
-    Name = "Refresh & Group Mobs",
-    Col = 1,
+    Name     = "Refresh & Group Mobs",
+    Col      = 1,
     Callback = function()
-        mobDropEl.Options = getGroupedMobs()
-        notify("Mobs list refreshed & grouped!")
+        mobDrop.Options = getGroupedMobs()
+        notify("Mob list refreshed!")
     end
 })
 
 window:createseparator(mobTab, 1)
 window:createlabel(mobTab, "PLAYER SELECTION", 2)
 
-local playerDropEl = window:createdropdown(mobTab, {
-    Name = "Target Player",
-    Col = 2,
-    Options = getPlayerNames(),
-    Default = "None",
-    Callback = function(val)
-        selectedPlayerTarget = val
-        Config.TargetPlayer = val
+local plrDrop = window:createdropdown(mobTab, {
+    Name     = "Target Player",
+    Col      = 2,
+    Options  = getPlayerNames(),
+    Default  = "None",
+    Callback = function(v)
+        selectedPlrTarget   = v
+        Config.TargetPlayer = v
     end
 })
 
 window:createbutton(mobTab, {
-    Name = "Refresh Players",
-    Col = 2,
+    Name     = "Refresh Players",
+    Col      = 2,
     Callback = function()
-        playerDropEl.Options = getPlayerNames()
+        plrDrop.Options = getPlayerNames()
         notify("Player list refreshed!")
     end
 })
@@ -766,9 +726,9 @@ window:createseparator(mobTab, 1)
 window:createlabel(mobTab, "AUTOMATION", 1)
 
 window:createtoggle(mobTab, {
-    Name = "Enable Target Farm",
-    Col = 1,
-    Default = false,
+    Name     = "Enable Target Farm",
+    Col      = 1,
+    Default  = false,
     Callback = function(v)
         isMobFarmOn = v
         if v then isLobbyFarmOn = false; isConjFarmOn = false end
@@ -776,104 +736,86 @@ window:createtoggle(mobTab, {
 })
 
 -- ==========================================
--- TAB: FARM SETUP (Positions & Keybinds)
+-- TAB: FARM SETUP
 -- ==========================================
 window:createlabel(combatTab, "AUTOFARM POSITION", 1)
 
 window:createdropdown(combatTab, {
-    Name = "Hit Position",
-    Col = 1,
-    Options = {"Above", "Below", "Behind", "Random", "Up & down"},
-    Default = Config.HitPosition,
-    Callback = function(val)
-        hitPosition = val
-        Config.HitPosition = val
-    end
+    Name     = "Hit Position",
+    Col      = 1,
+    Options  = {"Above","Below","Behind","Random","Up & down"},
+    Default  = Config.HitPosition,
+    Callback = function(v) hitPosition = v; Config.HitPosition = v end
 })
 
 window:createslider(combatTab, {
-    Name = "Offset Distance",
-    Col = 1,
-    Min = 5,
-    Max = 20,
-    Default = Config.OffsetDistance,
-    Callback = function(val)
-        OFFSET_DISTANCE = val
-        Config.OffsetDistance = val
-    end
+    Name     = "Offset Distance",
+    Col      = 1,
+    Min      = 5,
+    Max      = 20,
+    Default  = Config.OffsetDistance,
+    Callback = function(v) OFFSET_DISTANCE = v; Config.OffsetDistance = v end
 })
 
 window:createslider(combatTab, {
-    Name = "Switch Delay",
-    Col = 1,
-    Min = 1,
-    Max = 10,
-    Default = Config.RandomSwitchSpeed,
-    Callback = function(val)
-        RANDOM_SWITCH_SPEED = val
-        Config.RandomSwitchSpeed = val
-    end
+    Name     = "Switch Delay",
+    Col      = 1,
+    Min      = 1,
+    Max      = 10,
+    Default  = Config.RandomSwitchSpeed,
+    Callback = function(v) RAND_SWITCH_SPEED = v; Config.RandomSwitchSpeed = v end
 })
 
 window:createseparator(combatTab, 1)
 window:createlabel(combatTab, "CUSTOM KEYBINDS", 2)
 
 window:createdropdown(combatTab, {
-    Name = "Stand Keybind",
-    Col = 2,
-    Options = ALL_KEYS,
-    Default = Config.SummonKeyStr,
-    Callback = function(val)
-        if KEY_MAP[val] then
-            SUMMON_KEY = KEY_MAP[val]
-            Config.SummonKeyStr = val
-        end
+    Name     = "Stand Keybind",
+    Col      = 2,
+    Options  = ALL_KEYS,
+    Default  = Config.SummonKeyStr,
+    Callback = function(v)
+        if KEY_MAP[v] then SUMMON_KEY = KEY_MAP[v]; Config.SummonKeyStr = v end
     end
 })
 
--- Attack keys: single-select + Add/Remove buttons
 local atkKeySelected = "E"
-local atkKeyDropEl = window:createdropdown(combatTab, {
-    Name = "Add Attack Key",
-    Col = 2,
-    Options = ALL_KEYS,
-    Default = "E",
-    Callback = function(val)
-        atkKeySelected = val
-    end
+window:createdropdown(combatTab, {
+    Name     = "Add Attack Key",
+    Col      = 2,
+    Options  = ALL_KEYS,
+    Default  = "E",
+    Callback = function(v) atkKeySelected = v end
 })
 
 window:createbutton(combatTab, {
-    Name = "Add Key",
-    Col = 2,
-    Half = "Left",
-    SameRow = true,
+    Name     = "Add Key",
+    Col      = 2,
+    Half     = "Left",
+    SameRow  = true,
     Callback = function()
         if not KEY_MAP[atkKeySelected] then return end
-        local already = false
-        for _, k in Config.AttackKeyStrs do if k == atkKeySelected then already = true; break end end
-        if not already then
-            TableInsert(Config.AttackKeyStrs, atkKeySelected)
-            TableInsert(ATTACK_KEYS, KEY_MAP[atkKeySelected])
-            notify("Added attack key: " .. atkKeySelected)
-        else
-            notify(atkKeySelected .. " already in attack keys.")
+        for _, k in Config.AttackKeyStrs do
+            if k == atkKeySelected then notify(atkKeySelected .. " already added."); return end
         end
+        TblInsert(Config.AttackKeyStrs, atkKeySelected)
+        TblInsert(ATTACK_KEYS, KEY_MAP[atkKeySelected])
+        notify("Added attack key: " .. atkKeySelected)
     end
 })
 
 window:createbutton(combatTab, {
-    Name = "Remove Key",
-    Col = 2,
-    Half = "Right",
-    SameRow = false,
+    Name     = "Remove Key",
+    Col      = 2,
+    Half     = "Right",
+    SameRow  = false,
     Callback = function()
-        local newStrs = {}
-        local newKeys = {}
+        local newStrs: {string} = {}
+        local newKeys: {number} = {}
         for _, k in Config.AttackKeyStrs do
             if k ~= atkKeySelected then
-                TableInsert(newStrs, k)
-                if KEY_MAP[k] then TableInsert(newKeys, KEY_MAP[k]) end
+                TblInsert(newStrs, k)
+                if KEY_MAP[k] then TblInsert(newKeys, KEY_MAP[k]) end
             end
         end
         Config.AttackKeyStrs = newStrs
@@ -883,8 +825,8 @@ window:createbutton(combatTab, {
 })
 
 window:createbutton(combatTab, {
-    Name = "Clear All Attack Keys",
-    Col = 2,
+    Name     = "Clear All Attack Keys",
+    Col      = 2,
     Callback = function()
         Config.AttackKeyStrs = {}
         ATTACK_KEYS = {}
@@ -899,9 +841,9 @@ window:createlabel(conjTab, "CONJURATION FARM", 1)
 window:createlabel(conjTab, "Note: Be near the gym before enabling.", 1)
 
 window:createtoggle(conjTab, {
-    Name = "Enable Conj Farm",
-    Col = 1,
-    Default = false,
+    Name     = "Enable Conj Farm",
+    Col      = 1,
+    Default  = false,
     Callback = function(v)
         isConjFarmOn = v
         if v then isLobbyFarmOn = false; isMobFarmOn = false end
@@ -913,33 +855,31 @@ window:createtoggle(conjTab, {
 -- ==========================================
 window:createlabel(tpTab, "MAP LOCATIONS", 1)
 
-local tpLocations = {
-    {name = "Gym",                pos = VectorCreate(1158.18, 884.23, 15.51)},
-    {name = "Hospital",           pos = VectorCreate(-176.23, 912.65, -433.50)},
-    {name = "Morioh Station",     pos = VectorCreate(1194.91, 877.64, -734.11)},
-    {name = "Graveyard Mansion 1",pos = VectorCreate(2669.68, 949.90, 810.78)},
-    {name = "Graveyard Mansion 2",pos = VectorCreate(2899.12, 949.73, 1462.34)},
-    {name = "Store",              pos = VectorCreate(686.41, 896.76, -654.10)},
-    {name = "Docks",              pos = VectorCreate(-1471.51, 910.20, 537.61)}
+local TP_LOCATIONS = {
+    { name = "Gym",                 pos = VecCreate(1158.18,   884.23,   15.51)  },
+    { name = "Hospital",            pos = VecCreate(-176.23,   912.65, -433.50)  },
+    { name = "Morioh Station",      pos = VecCreate(1194.91,   877.64, -734.11)  },
+    { name = "Graveyard Mansion 1", pos = VecCreate(2669.68,   949.90,  810.78)  },
+    { name = "Graveyard Mansion 2", pos = VecCreate(2899.12,   949.73, 1462.34)  },
+    { name = "Store",               pos = VecCreate(686.41,    896.76, -654.10)  },
+    { name = "Docks",               pos = VecCreate(-1471.51,  910.20,  537.61)  },
 }
 
-for _, loc in tpLocations do
+for _, loc in TP_LOCATIONS do
     local locRef = loc
     window:createbutton(tpTab, {
-        Name = locRef.name,
-        Col = 1,
+        Name     = locRef.name,
+        Col      = 1,
         Callback = function()
-            local char = player.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if root then
-                task.spawn(function()
-                    for i = 1, 5 do
-                        root.CFrame = CFrame.new(locRef.pos)
-                        task.wait(0.05)
-                    end
-                    notify("Teleported to " .. locRef.name .. "!")
-                end)
-            end
+            local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+            if not root then return end
+            task.spawn(function()
+                for _ = 1, 5 do
+                    root.CFrame = CFrame.new(locRef.pos)
+                    task.wait(0.05)
+                end
+                notify("Teleported to " .. locRef.name .. "!")
+            end)
         end
     })
 end
@@ -947,155 +887,47 @@ end
 window:createlabel(tpTab, "PLAYER TELEPORT", 2)
 
 local selectedTpPlayer = "None"
-local tpPlayerDropEl = window:createdropdown(tpTab, {
-    Name = "Select Player",
-    Col = 2,
-    Options = getPlayerNames(),
-    Default = "None",
-    Callback = function(val)
-        selectedTpPlayer = val
-    end
+local tpPlrDrop = window:createdropdown(tpTab, {
+    Name     = "Select Player",
+    Col      = 2,
+    Options  = getPlayerNames(),
+    Default  = "None",
+    Callback = function(v) selectedTpPlayer = v end
 })
 
 window:createbutton(tpTab, {
-    Name = "Refresh Players",
-    Col = 2,
-    Half = "Left",
-    SameRow = true,
+    Name     = "Refresh Players",
+    Col      = 2,
+    Half     = "Left",
+    SameRow  = true,
     Callback = function()
-        tpPlayerDropEl.Options = getPlayerNames()
+        tpPlrDrop.Options = getPlayerNames()
         notify("Player list refreshed!")
     end
 })
 
 window:createbutton(tpTab, {
-    Name = "Teleport to Player",
-    Col = 2,
-    Half = "Right",
-    SameRow = false,
+    Name     = "Teleport to Player",
+    Col      = 2,
+    Half     = "Right",
+    SameRow  = false,
     Callback = function()
         if selectedTpPlayer == "None" or selectedTpPlayer == "" then
-            notify("Select a player first!")
-            return
+            notify("Select a player first!"); return
         end
-        local targetPlr = Players:FindFirstChild(selectedTpPlayer)
-        if targetPlr and targetPlr.Character and targetPlr.Character:FindFirstChild("HumanoidRootPart") then
-            local char = player.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if root then
-                task.spawn(function()
-                    for i = 1, 5 do
-                        root.CFrame = CFrame.new(targetPlr.Character.HumanoidRootPart.Position + VectorCreate(0, 3, 0))
-                        task.wait(0.05)
-                    end
-                    notify("Teleported to " .. targetPlr.Name .. "!")
-                end)
+        local tgt    = Players:FindFirstChild(selectedTpPlayer)
+        local tgtHrp = tgt and tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local root   = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+        if not root or not tgtHrp then notify("Player or character not found!"); return end
+        task.spawn(function()
+            for _ = 1, 5 do
+                root.CFrame = CFrame.new(tgtHrp.Position + VecCreate(0, 3, 0))
+                task.wait(0.05)
             end
-        else
-            notify("Player or character not found!")
-        end
+            notify("Teleported to " .. selectedTpPlayer .. "!")
+        end)
     end
 })
-
--- ==========================================
--- SHARED COMBAT HELPERS
--- ==========================================
-local function checkDioAbilityActive()
-    local effects = Workspace:FindFirstChild("Effects")
-    if not effects then return false end
-    
-    if effects:FindFirstChild("BigBlackHole") then 
-        return true 
-    end
-    
-    local slashi = effects:FindFirstChild("Slashi")
-    if slashi and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") then
-        return true
-    end
-    
-    return false
-end
-
-local function isStandOut(char)
-    if not char then return false end
-    local standAttr = char:GetAttribute("SummonedStand")
-    return (standAttr and standAttr ~= "" and standAttr ~= false)
-end
-
-local function forceSummon()
-    keypress(SUMMON_KEY)
-    task.wait(0.1 + (MathRandom() * 0.05))
-    keyrelease(SUMMON_KEY)
-    lastSummonTime = OsClock()
-end
-
-local function calculateTargetCFrame(targetRoot)
-    local pos = targetRoot.Position
-    local look = targetRoot.CFrame.LookVector
-    local mode = hitPosition
-
-    if mode == "Random" then
-        if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
-            local modes = {"Above", "Below", "Behind"}
-            currentRandomMode = modes[MathRandom(1, 3)]
-            lastRandomChange = OsClock()
-        end
-        mode = currentRandomMode
-    elseif mode == "Up & down" then
-        if OsClock() - lastRandomChange > RANDOM_SWITCH_SPEED then
-            if currentRandomMode == "Above" then
-                currentRandomMode = "Below"
-            else
-                currentRandomMode = "Above"
-            end
-            lastRandomChange = OsClock()
-        end
-        mode = currentRandomMode
-    end
-
-    -- ==========================================
-    -- DODGE MECHANIC
-    -- ==========================================
-    if checkDioAbilityActive() then
-        if not dioUiAbilityDetected then
-            dioUiAbilityDetected = true
-            dioUiAbilityTime = OsClock()
-            print("[BZL Hub] UI: Dio Ability Detected! Waiting 2 seconds.")
-        end
-    else
-        if dioUiAbilityDetected then
-            print("[BZL Hub] UI: Dio Ability Despawned. Resetting.")
-        end
-        dioUiAbilityDetected = false
-        loggedUiDodge = false
-    end
-
-    local dodging = false
-    -- Wait 2 seconds before executing dodge (ability MUST stay active for 2s)
-    if dioUiAbilityDetected and (OsClock() - dioUiAbilityTime >= 2) then
-        dodging = true
-        if not loggedUiDodge then
-            print("[BZL Hub] UI: 2 Seconds passed. Dodging!")
-            loggedUiDodge = true
-        end
-    end
-
-    if dodging then
-        if mode == "Above" then mode = "Below"
-        elseif mode == "Below" then mode = "Above"
-        elseif mode == "Behind" then mode = "Above"
-        elseif mode == "Middle" then mode = "Below"
-        end
-    end
-
-    if mode == "Above" then return CFrame.lookAt(pos + VectorCreate(0, OFFSET_DISTANCE, 0), pos)
-    elseif mode == "Below" then return CFrame.lookAt(pos + VectorCreate(0, -OFFSET_DISTANCE, 0), pos)
-    elseif mode == "Behind" then return CFrame.lookAt(pos - (look * OFFSET_DISTANCE), pos)
-    elseif mode == "Middle" then return CFrame.lookAt(pos + (look * 2.5), pos)
-    end
-
-    return CFrame.lookAt(pos + VectorCreate(0, OFFSET_DISTANCE, 0), pos)
-end
 
 -- ==========================================
 -- MODULE 1: RANDOMIZED KILLING
@@ -1106,131 +938,93 @@ task.spawn(function()
         if not isLobbyFarmOn then continue end
 
         local char = player.Character
-        if not char then continue end
-
-        local root = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
-        if not isStandOut(char) and (OsClock() - lastSummonTime) > 3 then forceSummon() end
+        if not isStandOut(char) and Clock() - lastSummonTime > 3 then forceSummon() end
 
-        local liveFolder = Workspace:FindFirstChild("Live")
-        if liveFolder then
-            local closestTarget = nil
-            local minDist = MathHuge
-            local myPos = root.Position
+        local lf = Workspace:FindFirstChild("Live")
+        if not lf then continue end
 
-            for _, v in liveFolder:GetChildren() do
-                if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char then
+        local best: BasePart? = nil
+        local bestDist = MathHuge
+        local myPos = root.Position
 
-                    if isWhitelisted(v) then continue end
+        for _, v in lf:GetChildren() do
+            if not (v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char) then continue end
+            if isWhitelisted(v) then continue end
+            local n = StrLower(v.Name)
+            if StrFind(n, "hostage", 1, true) or StrFind(n, "citizen", 1, true) then continue end
+            local mh = v:FindFirstChildOfClass("Humanoid")
+            if not (mh and mh.Health > 0) then continue end
+            local hrp = v.HumanoidRootPart :: BasePart
+            if hrp.Position.Y <= MIN_Y_LEVEL then continue end
+            local d = VecMag(myPos - hrp.Position)
+            if d < bestDist and d < MAX_DISTANCE then bestDist = d; best = hrp end
+        end
 
-                    local name = StringLower(v.Name)
-                    if not (StringFind(name, "hostage", 1, true) or StringFind(name, "citizen", 1, true)) then
-                        local mobHum = v:FindFirstChildOfClass("Humanoid")
-                        if mobHum and mobHum.Health > 0 then
-                            local hrp = v.HumanoidRootPart
-                            local tPos = hrp.Position
-                            if tPos.Y > MIN_Y_LEVEL then
-                                local dist = VectorMagnitude(myPos - tPos)
-                                if dist < minDist and dist < MAX_DISTANCE then
-                                    minDist = dist
-                                    closestTarget = hrp
-                                end
-                            end
-                        end
-                    end
-                end
-            end
+        if not best then continue end
+        root.CFrame = calculateTargetCFrame(best)
 
-            if closestTarget then
-                root.CFrame = calculateTargetCFrame(closestTarget)
-            end
-
-            if closestTarget and not isAttacking then
-                isAttacking = true
-                task.spawn(function()
-                    fireAttack(ATTACK_KEYS)
-                    isAttacking = false
-                end)
-            end
+        if not isAttacking then
+            isAttacking = true
+            task.spawn(function() fireAttack(ATTACK_KEYS); isAttacking = false end)
         end
     end
 end)
 
 -- ==========================================
--- MODULE 2: SPECIFIC TARGET FARM (Mob OR Player)
+-- MODULE 2: TARGET FARM (mob or player)
 -- ==========================================
 task.spawn(function()
     while true do
         task.wait(0.05)
         if not isMobFarmOn then continue end
 
-        local hasMobTarget = (selectedMob and selectedMob ~= "None" and selectedMob ~= "")
-        local hasPlayerTarget = (selectedPlayerTarget and selectedPlayerTarget ~= "None" and selectedPlayerTarget ~= "")
-
-        if not hasMobTarget and not hasPlayerTarget then continue end
+        local hasMob = selectedMob ~= "None" and selectedMob ~= ""
+        local hasPlr = selectedPlrTarget ~= "None" and selectedPlrTarget ~= ""
+        if not hasMob and not hasPlr then continue end
 
         local char = player.Character
-        if not char then continue end
-
-        local root = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
-        if not isStandOut(char) and (OsClock() - lastSummonTime) > 3 then forceSummon() end
+        if not isStandOut(char) and Clock() - lastSummonTime > 3 then forceSummon() end
 
-        local activeTargetKeyword = StringMatch(selectedMob, "^(.-) %(") or selectedMob
+        -- Strip count suffix: "Boss (3)" → "Boss"
+        local keyword = StrMatch(selectedMob, "^(.-) %(") or selectedMob
 
-        local liveFolder = Workspace:FindFirstChild("Live")
-        if liveFolder then
-            local closestTarget = nil
-            local minDist = MathHuge
-            local myPos = root.Position
+        local lf = Workspace:FindFirstChild("Live")
+        if not lf then continue end
 
-            for _, v in liveFolder:GetChildren() do
-                if v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char then
+        local best: BasePart? = nil
+        local bestDist = MathHuge
+        local myPos = root.Position
 
-                    if isWhitelisted(v) then continue end
+        for _, v in lf:GetChildren() do
+            if not (v:IsA("Model") and v:FindFirstChild("HumanoidRootPart") and v ~= char) then continue end
+            if isWhitelisted(v) then continue end
 
-                    local isTarget = false
+            local match = (hasMob and StrFind(v.Name, keyword, 1, true) ~= nil)
+                       or (hasPlr and v.Name == selectedPlrTarget)
+            if not match then continue end
 
-                    if hasMobTarget and StringFind(v.Name, activeTargetKeyword, 1, true) then
-                        isTarget = true
-                    end
+            local mh = v:FindFirstChildOfClass("Humanoid")
+            if not (mh and mh.Health > 0) then continue end
+            local hrp = v.HumanoidRootPart :: BasePart
+            if hrp.Position.Y <= MIN_Y_LEVEL then continue end
+            local d = VecMag(myPos - hrp.Position)
+            if d < bestDist then bestDist = d; best = hrp end
+        end
 
-                    if hasPlayerTarget and v.Name == selectedPlayerTarget then
-                        isTarget = true
-                    end
+        if not best then continue end
+        root.CFrame = calculateTargetCFrame(best)
 
-                    if isTarget then
-                        local mobHum = v:FindFirstChildOfClass("Humanoid")
-                        if mobHum and mobHum.Health > 0 then
-                            local hrp = v.HumanoidRootPart
-                            local tPos = hrp.Position
-                            if tPos.Y > MIN_Y_LEVEL then
-                                local dist = VectorMagnitude(myPos - tPos)
-                                if dist < minDist then
-                                    minDist = dist
-                                    closestTarget = hrp
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            if closestTarget then
-                root.CFrame = calculateTargetCFrame(closestTarget)
-            end
-
-            if closestTarget and not isAttacking then
-                isAttacking = true
-                task.spawn(function()
-                    fireAttack(ATTACK_KEYS)
-                    isAttacking = false
-                end)
-            end
+        if not isAttacking then
+            isAttacking = true
+            task.spawn(function() fireAttack(ATTACK_KEYS); isAttacking = false end)
         end
     end
 end)
@@ -1238,49 +1032,38 @@ end)
 -- ==========================================
 -- MODULE 3: CONJURATION AUTOFARM
 -- ==========================================
-local function findCombatTarget()
-    local liveFolder = Workspace:FindFirstChild("Live")
-    if not liveFolder then return nil end
 
+-- Returns closest alive, airborne (Y > 10000) non-player mob, or nil
+local function findConjTarget()
+    local lf   = Workspace:FindFirstChild("Live")
     local char = player.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then return nil end
+    local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+    if not lf or not root or root.Position.Y < 10000 then return nil end
 
     local myPos = root.Position
+    local best: {hrp: BasePart, hum: Humanoid, charModel: Model}? = nil
+    local bestD = 500
 
-    if myPos.Y < 10000 then return nil end
-
-    local closestTarget = nil
-    local minDistance = 500
-
-    for _, v in liveFolder:GetChildren() do
+    for _, v in lf:GetChildren() do
         if not v or v == char or v.Name == player.Name then continue end
-
         if isWhitelisted(v) then continue end
-
-        local isRealPlayer = false
+        local isPlr = false
         for _, p in Players:GetChildren() do
-            if p:IsA("Player") and p.Character == v then
-                isRealPlayer = true
-                break
-            end
+            if p:IsA("Player") and p.Character == v then isPlr = true; break end
         end
-        if isRealPlayer then continue end
+        if isPlr then continue end
 
-        local mobHum = v:FindFirstChildOfClass("Humanoid")
-        local targetHrp = v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")
-
-        if targetHrp and mobHum and mobHum.Health > 0 then
-            if targetHrp.Position.Y > 10000 then
-                local dist = VectorMagnitude(myPos - targetHrp.Position)
-                if dist < minDistance then
-                    minDistance = dist
-                    closestTarget = {hrp = targetHrp, hum = mobHum, charModel = v}
-                end
+        local hrp = (v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("Torso")) :: BasePart?
+        local mh  = v:FindFirstChildOfClass("Humanoid")
+        if hrp and mh and mh.Health > 0 and hrp.Position.Y > 10000 then
+            local d = VecMag(myPos - hrp.Position)
+            if d < bestD then
+                bestD = d
+                best  = { hrp = hrp, hum = mh, charModel = v :: Model }
             end
         end
     end
-    return closestTarget
+    return best
 end
 
 task.spawn(function()
@@ -1289,65 +1072,56 @@ task.spawn(function()
         if not isConjFarmOn then continue end
 
         local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
-        if not findCombatTarget() then
-            -- PHASE 1: YOGA MAT
-            local map = Workspace:FindFirstChild("Map")
+        if not findConjTarget() then
+            -- PHASE 1: Yoga Mat teleport
+            local map        = Workspace:FindFirstChild("Map")
             local meditation = map and map:FindFirstChild("Meditation")
-            local yogaMat = meditation and meditation:FindFirstChild("Yoga Mat")
+            local yogaMat    = meditation and meditation:FindFirstChild("Yoga Mat") :: BasePart?
 
-            if yogaMat and isConjFarmOn then
+            if yogaMat then
                 local teleported = false
-
                 while not teleported and isConjFarmOn do
-                    for i = 1, 5 do
-                        root.CFrame = CFrame.new(yogaMat.Position + VectorCreate(0, 3, 0))
+                    for _ = 1, 5 do
+                        root.CFrame = CFrame.new(yogaMat.Position + VecCreate(0, 3, 0))
                         task.wait(0.1)
                     end
-
                     local startPos = root.Position
 
-                    if keypress and isConjFarmOn then
-                        keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
-                        task.wait(0.05)
-                        keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
-                    end
+                    keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
+                    task.wait(0.05)
+                    keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
                     task.wait(0.2)
 
-                    local camLockActive = true
+                    local camLock = true
                     task.spawn(function()
-                        while camLockActive and isConjFarmOn do
+                        while camLock and isConjFarmOn do
                             task.wait()
-                            local cam = Workspace.CurrentCamera
-                            local c = player.Character
-                            local head = c and c:FindFirstChild("Head")
-                            if cam and head and yogaMat then
-                                cam.CFrame = CFrame.lookAt(head.Position + VectorCreate(0, 2, 5), yogaMat.Position)
+                            local cam  = Workspace.CurrentCamera
+                            local head = player.Character and player.Character:FindFirstChild("Head") :: BasePart?
+                            if cam and head then
+                                cam.CFrame = CFrame.lookAt(head.Position + VecCreate(0, 2, 5), yogaMat.Position)
                             end
                         end
                     end)
 
-                    local startTime = OsClock()
-                    if keypress and isConjFarmOn then
-                        keypress(E_KEY); task.wait(0.1); keyrelease(E_KEY); task.wait(0.1)
-                        keypress(E_KEY)
-                    end
+                    local t0 = Clock()
+                    keypress(E_KEY); task.wait(0.1); keyrelease(E_KEY); task.wait(0.1)
+                    keypress(E_KEY)
 
-                    while OsClock() - startTime < 5.5 and isConjFarmOn do
+                    while Clock() - t0 < 5.5 and isConjFarmOn do
                         task.wait(0.1)
-                        local currentHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                        if currentHrp and VectorMagnitude(currentHrp.Position - startPos) >= 40 then
-                            teleported = true
-                            break
+                        local curRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                        if curRoot and VecMag(curRoot.Position - startPos) >= 40 then
+                            teleported = true; break
                         end
                     end
 
-                    if keyrelease then keyrelease(E_KEY) end
-                    camLockActive = false
-
+                    keyrelease(E_KEY)
+                    camLock = false
                     if not teleported then task.wait(0.2) end
                 end
                 task.wait(0.5)
@@ -1355,56 +1129,47 @@ task.spawn(function()
 
             if not isConjFarmOn then continue end
 
-            -- PHASE 2: THE SELF
-            local npcs = Workspace:FindFirstChild("Npcs")
+            -- PHASE 2: The Self NPC
+            local npcs    = Workspace:FindFirstChild("Npcs")
             local theSelf = npcs and npcs:FindFirstChild("The Self")
-            local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart")
+            local selfHrp = theSelf and theSelf:FindFirstChild("HumanoidRootPart") :: BasePart?
 
-            if selfHrp and isConjFarmOn then
+            if selfHrp then
                 local inArena = false
                 while not inArena and isConjFarmOn do
-                    for i = 1, 5 do
-                        local targetCFrame = selfHrp.CFrame * CFrame.new(0, 0, -3)
-                        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                            player.Character.HumanoidRootPart.CFrame = CFrame.lookAt(targetCFrame.Position, selfHrp.Position)
+                    for _ = 1, 5 do
+                        local c2 = player.Character
+                        local r2 = c2 and c2:FindFirstChild("HumanoidRootPart") :: BasePart?
+                        if r2 then
+                            r2.CFrame = CFrame.lookAt(
+                                (selfHrp.CFrame * CFrame.new(0, 0, -3)).Position,
+                                selfHrp.Position
+                            )
                         end
                         task.wait(0.05)
                     end
-
                     local startPos = player.Character.HumanoidRootPart.Position
 
-                    if keypress and isConjFarmOn then
-                        keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
-                        task.wait(0.05)
-                        keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
-                    end
+                    keypress(A_KEY); task.wait(0.05); keyrelease(A_KEY)
+                    task.wait(0.05)
+                    keypress(D_KEY); task.wait(0.05); keyrelease(D_KEY)
                     task.wait(0.2)
 
-                    local startTime = OsClock()
-                    if keypress and isConjFarmOn then keypress(E_KEY) end
+                    local t0 = Clock()
+                    keypress(E_KEY)
                     task.wait(1.5)
 
                     while isConjFarmOn do
                         task.wait(0.05)
-                        if keypress then
-                            keypress(ONE_KEY)
-                            task.wait(0.01)
-                            keyrelease(ONE_KEY)
+                        keypress(ONE_KEY); task.wait(0.01); keyrelease(ONE_KEY)
+                        local curRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                        if (curRoot and VecMag(curRoot.Position - startPos) >= 40) or findConjTarget() then
+                            inArena = true; break
                         end
-
-                        local curHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                        if (curHrp and VectorMagnitude(curHrp.Position - startPos) >= 40) or findCombatTarget() then
-                            inArena = true
-                            break
-                        end
-
-                        if OsClock() - startTime > 8.5 then break end
+                        if Clock() - t0 > 8.5 then break end
                     end
 
-                    if keyrelease then
-                        keyrelease(E_KEY)
-                        keyrelease(ONE_KEY)
-                    end
+                    keyrelease(E_KEY); keyrelease(ONE_KEY)
                     if not inArena then task.wait(0.5) end
                 end
             end
@@ -1412,49 +1177,46 @@ task.spawn(function()
 
         if not isConjFarmOn then continue end
 
-        -- PHASE 3: COMBAT
-        local target = nil
-        local waitBoss = OsClock()
+        -- PHASE 3: Combat in arena
+        local target    = nil
+        local waitStart = Clock()
         while not target and isConjFarmOn do
-            target = findCombatTarget()
+            target = findConjTarget()
             task.wait(0.1)
-            if OsClock() - waitBoss > 15 then break end
+            if Clock() - waitStart > 15 then break end
         end
 
-        local lastSummon = 0
-        local attacking = false
+        local conjLastSummon = 0
+        local conjAttacking  = false
 
         while target and target.hum and target.hum.Parent and target.hum.Health > 0 and isConjFarmOn do
             task.wait(0.05)
-            local c = player.Character
-            local r = c and c:FindFirstChild("HumanoidRootPart")
-            local charHum = c and c:FindFirstChildOfClass("Humanoid")
-            if not r or not charHum or charHum.Health <= 0 then break end
+            local c2   = player.Character
+            local r2   = c2 and c2:FindFirstChild("HumanoidRootPart") :: BasePart?
+            local hum2 = c2 and c2:FindFirstChildOfClass("Humanoid")
+            if not r2 or not hum2 or hum2.Health <= 0 then break end
 
-            if not isStandOut(c) and (OsClock() - lastSummon) > 3 then
+            if not isStandOut(c2) and Clock() - conjLastSummon > 3 then
                 keypress(SUMMON_KEY); task.wait(0.1); keyrelease(SUMMON_KEY)
-                lastSummon = OsClock()
+                conjLastSummon = Clock()
             end
 
-            r.CFrame = calculateTargetCFrame(target.hrp)
+            r2.CFrame = calculateTargetCFrame(target.hrp)
 
-            if not attacking then
-                attacking = true
-                task.spawn(function()
-                    fireAttack(ATTACK_KEYS)
-                    attacking = false
-                end)
+            if not conjAttacking then
+                conjAttacking = true
+                task.spawn(function() fireAttack(ATTACK_KEYS); conjAttacking = false end)
             end
         end
 
-        -- PHASE 4: RETURN (Altitude Fix)
+        -- PHASE 4: Wait to descend below arena altitude
         if isConjFarmOn then
-            local returnTimer = OsClock()
+            local returnStart = Clock()
             repeat
                 task.wait(0.5)
-                local curChar = player.Character
-                local curHrp = curChar and curChar:FindFirstChild("HumanoidRootPart")
-            until not isConjFarmOn or not curHrp or curHrp.Position.Y < 10000 or (OsClock() - returnTimer > 15)
+                local curRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+                if not curRoot or curRoot.Position.Y < 10000 then break end
+            until not isConjFarmOn or Clock() - returnStart > 15
             task.wait(1)
         end
     end
