@@ -140,6 +140,13 @@ local dioAbilityDetected = false
 local dioAbilityTime     = 0
 local dioAbilityLogged   = false
 
+-- HorizontalSlash (big meteor) state
+local dioSlashDetected = false
+local dioSlashTime     = 0
+local dioSlashLogged   = false
+local HSLASH_WAIT      = 2    -- seconds before reacting
+local HSLASH_FLEE_DIST = 50   -- studs to teleport away
+
 -- ==========================================
 -- WHITELIST (set for O(1) lookup)
 -- ==========================================
@@ -191,8 +198,23 @@ local function checkDioAbility(): boolean
     return slashi ~= nil and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") ~= nil
 end
 
+-- HorizontalSlashParts = big meteor attack. Radius damage — need to run away
+-- horizontally, not flip above/below.
+local function checkDioSlash(): boolean
+    local effects = Workspace:FindFirstChild("Effects")
+    if not effects then return false end
+    -- Check direct children first (fast path)
+    if effects:FindFirstChild("HorizontalSlashParts") then return true end
+    -- Fall back to searching descendants in case it's nested
+    for _, d in effects:GetDescendants() do
+        if d.Name == "HorizontalSlashParts" then return true end
+    end
+    return false
+end
+
 -- Returns the CFrame the player's HRP should be set to for attacking targetRoot.
--- Handles Random / Up & down cycling and Dio ability dodge.
+-- Handles Random / Up & down cycling, Dio ability dodge (flip), and
+-- HorizontalSlashParts dodge (flee 50 studs horizontally).
 local function calculateTargetCFrame(targetRoot: BasePart): CFrame
     local pos  = targetRoot.Position
     local look = targetRoot.CFrame.LookVector
@@ -214,7 +236,37 @@ local function calculateTargetCFrame(targetRoot: BasePart): CFrame
         mode = currentRandMode
     end
 
-    -- Dio ability dodge tracking
+    -- HorizontalSlashParts (meteor) tracking — HIGHEST priority dodge
+    local slashActive = checkDioSlash()
+    if slashActive then
+        if not dioSlashDetected then
+            dioSlashDetected = true
+            dioSlashTime     = Clock()
+            print("[BZL Hub]: HorizontalSlashParts detected — waiting 2s before fleeing.")
+        end
+    else
+        if dioSlashDetected then
+            print("[BZL Hub]: HorizontalSlashParts gone — resuming attack.")
+        end
+        dioSlashDetected = false
+        dioSlashLogged   = false
+    end
+
+    -- If slash has been sustained for 2s+, flee horizontally
+    if dioSlashDetected and (Clock() - dioSlashTime >= HSLASH_WAIT) then
+        if not dioSlashLogged then
+            print("[BZL Hub]: Fleeing from meteor!")
+            dioSlashLogged = true
+        end
+        -- Compute a horizontal flee direction away from the target, on XZ plane.
+        -- Use targetRoot's LookVector flattened, then move OPPOSITE (behind-and-away).
+        local flat = VecCreate(look.X, 0, look.Z)
+        local mag  = VecMag(flat)
+        local dir  = if mag > 0.001 then flat / mag else VecCreate(1, 0, 0)
+        return CFrame.new(pos - dir * HSLASH_FLEE_DIST)
+    end
+
+    -- Dio ability dodge tracking (flip position)
     local abilityActive = checkDioAbility()
     if abilityActive then
         if not dioAbilityDetected then
@@ -337,6 +389,11 @@ if cfgAr.Enabled == true then
     local arDioDetected = false
     local arDioTime     = 0
     local arDioLogged   = false
+
+    -- Headless HorizontalSlashParts dodge state
+    local arSlashDetected = false
+    local arSlashTime     = 0
+    local arSlashLogged   = false
 
     -- Kill switch: / key
     task.spawn(function()
@@ -549,7 +606,7 @@ if cfgAr.Enabled == true then
 
             if not best then continue end
 
-            -- Headless-local Dio dodge
+            -- Headless-local Dio ability dodge (flip)
             local abilityOn = checkDioAbility()
             if abilityOn then
                 if not arDioDetected then
@@ -559,6 +616,33 @@ if cfgAr.Enabled == true then
             else
                 if arDioDetected then print("[BZL Hub] HEADLESS: Dio Ability gone.") end
                 arDioDetected = false; arDioLogged = false
+            end
+
+            -- Headless-local HorizontalSlashParts (meteor) dodge
+            local slashOn = checkDioSlash()
+            if slashOn then
+                if not arSlashDetected then
+                    arSlashDetected = true; arSlashTime = Clock()
+                    print("[BZL Hub] HEADLESS: HorizontalSlashParts detected — waiting 2s.")
+                end
+            else
+                if arSlashDetected then print("[BZL Hub] HEADLESS: HorizontalSlashParts gone.") end
+                arSlashDetected = false; arSlashLogged = false
+            end
+
+            -- If meteor is armed, flee 50 studs horizontally and skip this tick's normal positioning
+            if arSlashDetected and Clock() - arSlashTime >= HSLASH_WAIT then
+                if not arSlashLogged then
+                    print("[BZL Hub] HEADLESS: Fleeing from meteor!")
+                    arSlashLogged = true
+                end
+                local look0 = best.CFrame.LookVector
+                local flat  = VecCreate(look0.X, 0, look0.Z)
+                local mag   = VecMag(flat)
+                local dir   = if mag > 0.001 then flat / mag else VecCreate(1, 0, 0)
+                root.CFrame = CFrame.new(best.Position - dir * HSLASH_FLEE_DIST)
+                -- Skip attack while fleeing — we're out of range anyway
+                continue
             end
 
             local mode = arHitPos
@@ -635,9 +719,11 @@ local tpTab     = window:createtab("Teleports")
 window:createlabel(lobbyTab, "RANDOMIZED KILLING", 1)
 
 window:createtoggle(lobbyTab, {
-    Name     = "Enable Autofarm",
-    Col      = 1,
-    Default  = false,
+    Name           = "Enable Autofarm",
+    Col            = 1,
+    Default        = false,
+    HasKeybind     = true,
+    DefaultKeybind = "None",
     Callback = function(v)
         isLobbyFarmOn = v
         if v then isMobFarmOn = false; isConjFarmOn = false end
@@ -764,9 +850,11 @@ window:createseparator(mobTab, 1)
 window:createlabel(mobTab, "AUTOMATION", 1)
 
 window:createtoggle(mobTab, {
-    Name     = "Enable Target Farm",
-    Col      = 1,
-    Default  = false,
+    Name           = "Enable Target Farm",
+    Col            = 1,
+    Default        = false,
+    HasKeybind     = true,
+    DefaultKeybind = "None",
     Callback = function(v)
         isMobFarmOn = v
         if v then isLobbyFarmOn = false; isConjFarmOn = false end
@@ -879,9 +967,11 @@ window:createlabel(conjTab, "CONJURATION FARM", 1)
 window:createlabel(conjTab, "Note: Be near the gym before enabling.", 1)
 
 window:createtoggle(conjTab, {
-    Name     = "Enable Conj Farm",
-    Col      = 1,
-    Default  = false,
+    Name           = "Enable Conj Farm",
+    Col            = 1,
+    Default        = false,
+    HasKeybind     = true,
+    DefaultKeybind = "None",
     Callback = function(v)
         isConjFarmOn = v
         if v then isLobbyFarmOn = false; isMobFarmOn = false end
