@@ -213,15 +213,10 @@ local function checkDioAbility(): boolean
     return slashi ~= nil and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") ~= nil
 end
 
--- MoonMeshWithParticles = Dio's big meteor explosion. Radius damage — dodge
--- UNDER and 60 studs horizontally away from its actual position.
+-- MoonMeshWithParticles = Dio's big meteor explosion. Confirmed via debug
+-- that this part lives as a DIRECT CHILD of Workspace (not Effects).
 -- Returns the meteor's BasePart, or nil if not active.
--- Strategy: O(1) direct lookup, then a single-level scan of Effects children
--- (NOT GetDescendants — that crashes the executor in heavy raids).
 local function getDioSlashPart(): BasePart?
-    local effects = Workspace:FindFirstChild("Effects")
-    if not effects then return nil end
-
     local function asPart(obj: Instance?): BasePart?
         if not obj then return nil end
         if obj:IsA("BasePart") then return obj :: BasePart end
@@ -231,22 +226,14 @@ local function getDioSlashPart(): BasePart?
         return nil
     end
 
-    -- Direct child of Effects (fast path)
-    local m = asPart(effects:FindFirstChild("MoonMeshWithParticles"))
+    -- Primary location: direct child of Workspace
+    local m = asPart(Workspace:FindFirstChild("MoonMeshWithParticles"))
     if m then return m end
 
-    -- Inside Slashi (matches the SlashDiagnolParts2 nesting pattern)
-    local slashi = effects:FindFirstChild("Slashi")
-    if slashi then
-        m = asPart(slashi:FindFirstChild("MoonMeshWithParticles"))
-        if m then return m end
-    end
-
-    -- One-level scan: check each Effects child for a "MoonMeshWithParticles"
-    -- as their immediate child. Each FindFirstChild is O(1), and we iterate
-    -- only top-level Effects children — no recursion.
-    for _, child in effects:GetChildren() do
-        m = asPart(child:FindFirstChild("MoonMeshWithParticles"))
+    -- Fallback: Effects (in case the game moves it later)
+    local effects = Workspace:FindFirstChild("Effects")
+    if effects then
+        m = asPart(effects:FindFirstChild("MoonMeshWithParticles"))
         if m then return m end
     end
 
