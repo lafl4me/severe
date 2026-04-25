@@ -58,7 +58,8 @@ local function normalizePosition(s: any): string
     return "Above"
 end
 
--- Fires an attack combo: M1 then all configured ability keys
+-- Fires an attack combo: M1 then all configured ability keys.
+-- Constant micro-wait between keys (no randomization) to avoid hot-path churn.
 local function fireAttack(attackKeys: {number})
     if #attackKeys == 0 then return end
     mouse1press()
@@ -66,7 +67,7 @@ local function fireAttack(attackKeys: {number})
     mouse1release()
     for _, k in attackKeys do
         keypress(k)
-        task.wait(0.01 + MathRand() * 0.01)
+        task.wait(0.02)
         keyrelease(k)
     end
 end
@@ -190,11 +191,14 @@ local function forceSummon()
     lastSummonTime = Clock()
 end
 
+-- Cached zero vector (vector.zero is unreliable in Severe; explicit Vector3 is safe)
+local ZERO_VEC = Vector3.new(0, 0, 0)
+
 -- Lock the player to a hover CFrame and zero velocity so gravity / knockback
 -- doesn't pull them between ticks. Use for ALL combat positioning.
 local function applyHover(root: BasePart, cf: CFrame)
     root.CFrame = cf
-    root.AssemblyLinearVelocity = vector.zero
+    root.AssemblyLinearVelocity = ZERO_VEC
 end
 
 local function checkDioAbility(): boolean
@@ -205,10 +209,10 @@ local function checkDioAbility(): boolean
     return slashi ~= nil and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") ~= nil
 end
 
--- HorizontalSlashParts = big meteor attack. Radius damage — flee horizontally,
--- 50 studs from the meteor's actual position (don't just flip above/below).
--- Returns the meteor's BasePart for position lookup, or nil if not active.
--- Note: NO deep descendant scan — that's a 20Hz hot path and Effects is huge.
+-- MoonMeshWithParticles = Dio's big meteor explosion. Radius damage — flee
+-- horizontally, 50 studs from the meteor's actual position (not just flip
+-- above/below). Returns the meteor's BasePart, or nil if not active.
+-- NO deep descendant scan — that's a 20Hz hot path and Effects is huge.
 local function getDioSlashPart(): BasePart?
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return nil end
@@ -223,12 +227,12 @@ local function getDioSlashPart(): BasePart?
     end
 
     -- Direct child of Effects
-    local m = asPart(effects:FindFirstChild("HorizontalSlashParts"))
+    local m = asPart(effects:FindFirstChild("MoonMeshWithParticles"))
     if m then return m end
     -- Inside Slashi (matches the SlashDiagnolParts2 nesting pattern)
     local slashi = effects:FindFirstChild("Slashi")
     if slashi then
-        m = asPart(slashi:FindFirstChild("HorizontalSlashParts"))
+        m = asPart(slashi:FindFirstChild("MoonMeshWithParticles"))
         if m then return m end
     end
     return nil
@@ -236,7 +240,7 @@ end
 
 -- Returns the CFrame the player's HRP should be set to for attacking targetRoot.
 -- Handles Random / Up & down cycling, Dio ability dodge (flip), and
--- HorizontalSlashParts dodge (flee 50 studs horizontally).
+-- MoonMeshWithParticles dodge (flee 50 studs horizontally).
 local function calculateTargetCFrame(targetRoot: BasePart): CFrame
     local pos  = targetRoot.Position
     local look = targetRoot.CFrame.LookVector
@@ -258,17 +262,17 @@ local function calculateTargetCFrame(targetRoot: BasePart): CFrame
         mode = currentRandMode
     end
 
-    -- HorizontalSlashParts (meteor) tracking — HIGHEST priority dodge
+    -- MoonMeshWithParticles (meteor) tracking — HIGHEST priority dodge
     local slashPart = getDioSlashPart()
     if slashPart then
         if not dioSlashDetected then
             dioSlashDetected = true
             dioSlashTime     = Clock()
-            print("[BZL Hub]: HorizontalSlashParts detected — waiting 2s before fleeing.")
+            print("[BZL Hub]: MoonMeshWithParticles detected — waiting 2s before fleeing.")
         end
     else
         if dioSlashDetected then
-            print("[BZL Hub]: HorizontalSlashParts gone — resuming attack.")
+            print("[BZL Hub]: MoonMeshWithParticles gone — resuming attack.")
         end
         dioSlashDetected = false
         dioSlashLogged   = false
@@ -421,7 +425,7 @@ if cfgAr.Enabled == true then
     local arDioTime     = 0
     local arDioLogged   = false
 
-    -- Headless HorizontalSlashParts dodge state
+    -- Headless MoonMeshWithParticles dodge state
     local arSlashDetected = false
     local arSlashTime     = 0
     local arSlashLogged   = false
@@ -649,15 +653,15 @@ if cfgAr.Enabled == true then
                 arDioDetected = false; arDioLogged = false
             end
 
-            -- Headless-local HorizontalSlashParts (meteor) dodge
+            -- Headless-local MoonMeshWithParticles (meteor) dodge
             local slashPart = getDioSlashPart()
             if slashPart then
                 if not arSlashDetected then
                     arSlashDetected = true; arSlashTime = Clock()
-                    print("[BZL Hub] HEADLESS: HorizontalSlashParts detected — waiting 2s.")
+                    print("[BZL Hub] HEADLESS: MoonMeshWithParticles detected — waiting 2s.")
                 end
             else
-                if arSlashDetected then print("[BZL Hub] HEADLESS: HorizontalSlashParts gone.") end
+                if arSlashDetected then print("[BZL Hub] HEADLESS: MoonMeshWithParticles gone.") end
                 arSlashDetected = false; arSlashLogged = false
             end
 
@@ -703,9 +707,9 @@ if cfgAr.Enabled == true then
 
             local pos  = best.Position
             local look = best.CFrame.LookVector
-            if mode == "Below"  then root.CFrame = CFrame.lookAt(pos + VecCreate(0, -arOffset, 0), pos)
-            elseif mode == "Behind" then root.CFrame = CFrame.lookAt(pos - look * arOffset, pos)
-            else root.CFrame = CFrame.lookAt(pos + VecCreate(0, arOffset, 0), pos) end
+            if mode == "Below"  then applyHover(root, CFrame.lookAt(pos + VecCreate(0, -arOffset, 0), pos))
+            elseif mode == "Behind" then applyHover(root, CFrame.lookAt(pos - look * arOffset, pos))
+            else applyHover(root, CFrame.lookAt(pos + VecCreate(0, arOffset, 0), pos)) end
 
             if not arAttacking then
                 arAttacking = true
@@ -1128,7 +1132,7 @@ task.spawn(function()
         end
 
         if not best then continue end
-        root.CFrame = calculateTargetCFrame(best)
+        applyHover(root, calculateTargetCFrame(best))
 
         if not isAttacking then
             isAttacking = true
@@ -1183,7 +1187,7 @@ task.spawn(function()
         end
 
         if not best then continue end
-        root.CFrame = calculateTargetCFrame(best)
+        applyHover(root, calculateTargetCFrame(best))
 
         if not isAttacking then
             isAttacking = true
@@ -1364,7 +1368,7 @@ task.spawn(function()
                 conjLastSummon = Clock()
             end
 
-            r2.CFrame = calculateTargetCFrame(target.hrp)
+            applyHover(r2, calculateTargetCFrame(target.hrp))
 
             if not conjAttacking then
                 conjAttacking = true
