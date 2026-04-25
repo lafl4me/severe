@@ -196,9 +196,11 @@ local ZERO_VEC = Vector3.new(0, 0, 0)
 
 -- Lock the player to a hover CFrame and zero velocity so gravity / knockback
 -- doesn't pull them between ticks. Use for ALL combat positioning.
+-- Note: Severe doesn't expose AssemblyLinearVelocity as writable — using
+-- legacy `Velocity` property which IS writable per docs.
 local function applyHover(root: BasePart, cf: CFrame)
     root.CFrame = cf
-    root.AssemblyLinearVelocity = ZERO_VEC
+    root.Velocity = ZERO_VEC
 end
 
 local function checkDioAbility(): boolean
