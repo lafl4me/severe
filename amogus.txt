@@ -198,18 +198,39 @@ local function checkDioAbility(): boolean
     return slashi ~= nil and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") ~= nil
 end
 
--- HorizontalSlashParts = big meteor attack. Radius damage — need to run away
--- horizontally, not flip above/below.
-local function checkDioSlash(): boolean
+-- HorizontalSlashParts = big meteor attack. Radius damage — flee horizontally,
+-- 50 studs from the meteor's actual position (don't just flip above/below).
+-- Returns the meteor's BasePart for position lookup, or nil if not active.
+local function getDioSlashPart(): BasePart?
     local effects = Workspace:FindFirstChild("Effects")
-    if not effects then return false end
-    -- Check direct children first (fast path)
-    if effects:FindFirstChild("HorizontalSlashParts") then return true end
-    -- Fall back to searching descendants in case it's nested
-    for _, d in effects:GetDescendants() do
-        if d.Name == "HorizontalSlashParts" then return true end
+    if not effects then return nil end
+
+    local function asPart(obj: Instance?): BasePart?
+        if not obj then return nil end
+        if obj:IsA("BasePart") then return obj :: BasePart end
+        -- It's a Model/Folder: return first BasePart descendant
+        for _, c in obj:GetChildren() do
+            if c:IsA("BasePart") then return c :: BasePart end
+        end
+        return nil
     end
-    return false
+
+    -- Direct child of Effects (fast path)
+    local m = asPart(effects:FindFirstChild("HorizontalSlashParts"))
+    if m then return m end
+    -- Inside Slashi (matches the SlashDiagnolParts2 nesting pattern)
+    local slashi = effects:FindFirstChild("Slashi")
+    if slashi then
+        m = asPart(slashi:FindFirstChild("HorizontalSlashParts"))
+        if m then return m end
+    end
+    -- Last resort: deep scan (only run when shallow lookups failed)
+    for _, d in effects:GetDescendants() do
+        if d.Name == "HorizontalSlashParts" and d:IsA("BasePart") then
+            return d :: BasePart
+        end
+    end
+    return nil
 end
 
 -- Returns the CFrame the player's HRP should be set to for attacking targetRoot.
@@ -237,8 +258,8 @@ local function calculateTargetCFrame(targetRoot: BasePart): CFrame
     end
 
     -- HorizontalSlashParts (meteor) tracking — HIGHEST priority dodge
-    local slashActive = checkDioSlash()
-    if slashActive then
+    local slashPart = getDioSlashPart()
+    if slashPart then
         if not dioSlashDetected then
             dioSlashDetected = true
             dioSlashTime     = Clock()
@@ -252,18 +273,27 @@ local function calculateTargetCFrame(targetRoot: BasePart): CFrame
         dioSlashLogged   = false
     end
 
-    -- If slash has been sustained for 2s+, flee horizontally
-    if dioSlashDetected and (Clock() - dioSlashTime >= HSLASH_WAIT) then
+    -- If slash has been sustained for 2s+, flee 50 studs horizontally from the meteor
+    if dioSlashDetected and slashPart and (Clock() - dioSlashTime >= HSLASH_WAIT) then
         if not dioSlashLogged then
             print("[BZL Hub]: Fleeing from meteor!")
             dioSlashLogged = true
         end
-        -- Compute a horizontal flee direction away from the target, on XZ plane.
-        -- Use targetRoot's LookVector flattened, then move OPPOSITE (behind-and-away).
-        local flat = VecCreate(look.X, 0, look.Z)
-        local mag  = VecMag(flat)
-        local dir  = if mag > 0.001 then flat / mag else VecCreate(1, 0, 0)
-        return CFrame.new(pos - dir * HSLASH_FLEE_DIST)
+        local mPos = slashPart.Position
+        local char = player.Character
+        local hrp  = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+        local pPos = if hrp then hrp.Position else pos
+        -- Direction from meteor to player, flattened to XZ plane
+        local awayXZ = VecCreate(pPos.X - mPos.X, 0, pPos.Z - mPos.Z)
+        local mag    = VecMag(awayXZ)
+        local unit   = if mag > 0.001 then awayXZ / mag else VecCreate(1, 0, 0)
+        -- Land 50 studs from the meteor in that direction, preserving player's Y
+        local safe = VecCreate(
+            mPos.X + unit.X * HSLASH_FLEE_DIST,
+            pPos.Y,
+            mPos.Z + unit.Z * HSLASH_FLEE_DIST
+        )
+        return CFrame.new(safe)
     end
 
     -- Dio ability dodge tracking (flip position)
@@ -619,8 +649,8 @@ if cfgAr.Enabled == true then
             end
 
             -- Headless-local HorizontalSlashParts (meteor) dodge
-            local slashOn = checkDioSlash()
-            if slashOn then
+            local slashPart = getDioSlashPart()
+            if slashPart then
                 if not arSlashDetected then
                     arSlashDetected = true; arSlashTime = Clock()
                     print("[BZL Hub] HEADLESS: HorizontalSlashParts detected — waiting 2s.")
@@ -630,19 +660,23 @@ if cfgAr.Enabled == true then
                 arSlashDetected = false; arSlashLogged = false
             end
 
-            -- If meteor is armed, flee 50 studs horizontally and skip this tick's normal positioning
-            if arSlashDetected and Clock() - arSlashTime >= HSLASH_WAIT then
+            -- If meteor is armed for 2s+, flee 50 studs horizontally from it
+            if arSlashDetected and slashPart and Clock() - arSlashTime >= HSLASH_WAIT then
                 if not arSlashLogged then
                     print("[BZL Hub] HEADLESS: Fleeing from meteor!")
                     arSlashLogged = true
                 end
-                local look0 = best.CFrame.LookVector
-                local flat  = VecCreate(look0.X, 0, look0.Z)
-                local mag   = VecMag(flat)
-                local dir   = if mag > 0.001 then flat / mag else VecCreate(1, 0, 0)
-                root.CFrame = CFrame.new(best.Position - dir * HSLASH_FLEE_DIST)
-                -- Skip attack while fleeing — we're out of range anyway
-                continue
+                local mPos = slashPart.Position
+                local pPos = root.Position
+                local awayXZ = VecCreate(pPos.X - mPos.X, 0, pPos.Z - mPos.Z)
+                local mag    = VecMag(awayXZ)
+                local unit   = if mag > 0.001 then awayXZ / mag else VecCreate(1, 0, 0)
+                root.CFrame = CFrame.new(VecCreate(
+                    mPos.X + unit.X * HSLASH_FLEE_DIST,
+                    pPos.Y,
+                    mPos.Z + unit.Z * HSLASH_FLEE_DIST
+                ))
+                continue  -- skip attack while fleeing
             end
 
             local mode = arHitPos
