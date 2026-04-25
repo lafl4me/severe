@@ -190,6 +190,13 @@ local function forceSummon()
     lastSummonTime = Clock()
 end
 
+-- Lock the player to a hover CFrame and zero velocity so gravity / knockback
+-- doesn't pull them between ticks. Use for ALL combat positioning.
+local function applyHover(root: BasePart, cf: CFrame)
+    root.CFrame = cf
+    root.AssemblyLinearVelocity = vector.zero
+end
+
 local function checkDioAbility(): boolean
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return false end
@@ -201,6 +208,7 @@ end
 -- HorizontalSlashParts = big meteor attack. Radius damage — flee horizontally,
 -- 50 studs from the meteor's actual position (don't just flip above/below).
 -- Returns the meteor's BasePart for position lookup, or nil if not active.
+-- Note: NO deep descendant scan — that's a 20Hz hot path and Effects is huge.
 local function getDioSlashPart(): BasePart?
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return nil end
@@ -208,14 +216,13 @@ local function getDioSlashPart(): BasePart?
     local function asPart(obj: Instance?): BasePart?
         if not obj then return nil end
         if obj:IsA("BasePart") then return obj :: BasePart end
-        -- It's a Model/Folder: return first BasePart descendant
         for _, c in obj:GetChildren() do
             if c:IsA("BasePart") then return c :: BasePart end
         end
         return nil
     end
 
-    -- Direct child of Effects (fast path)
+    -- Direct child of Effects
     local m = asPart(effects:FindFirstChild("HorizontalSlashParts"))
     if m then return m end
     -- Inside Slashi (matches the SlashDiagnolParts2 nesting pattern)
@@ -223,12 +230,6 @@ local function getDioSlashPart(): BasePart?
     if slashi then
         m = asPart(slashi:FindFirstChild("HorizontalSlashParts"))
         if m then return m end
-    end
-    -- Last resort: deep scan (only run when shallow lookups failed)
-    for _, d in effects:GetDescendants() do
-        if d.Name == "HorizontalSlashParts" and d:IsA("BasePart") then
-            return d :: BasePart
-        end
     end
     return nil
 end
@@ -671,11 +672,11 @@ if cfgAr.Enabled == true then
                 local awayXZ = VecCreate(pPos.X - mPos.X, 0, pPos.Z - mPos.Z)
                 local mag    = VecMag(awayXZ)
                 local unit   = if mag > 0.001 then awayXZ / mag else VecCreate(1, 0, 0)
-                root.CFrame = CFrame.new(VecCreate(
+                applyHover(root, CFrame.new(VecCreate(
                     mPos.X + unit.X * HSLASH_FLEE_DIST,
                     pPos.Y,
                     mPos.Z + unit.Z * HSLASH_FLEE_DIST
-                ))
+                )))
                 continue  -- skip attack while fleeing
             end
 
