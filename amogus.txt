@@ -145,8 +145,10 @@ local dioAbilityLogged   = false
 local dioSlashDetected = false
 local dioSlashTime     = 0
 local dioSlashLogged   = false
-local HSLASH_WAIT      = 2    -- seconds before reacting
-local HSLASH_FLEE_DIST = 50   -- studs to teleport away
+-- MoonMeshWithParticles (Dio meteor) dodge tuning
+local HSLASH_WAIT      = 2     -- seconds armed before fleeing
+local HSLASH_FLEE_DIST = 60    -- horizontal studs from meteor
+local HSLASH_BELOW_OFS = 30    -- studs below the meteor's Y
 
 -- ==========================================
 -- WHITELIST (set for O(1) lookup)
@@ -211,10 +213,11 @@ local function checkDioAbility(): boolean
     return slashi ~= nil and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") ~= nil
 end
 
--- MoonMeshWithParticles = Dio's big meteor explosion. Radius damage — flee
--- horizontally, 50 studs from the meteor's actual position (not just flip
--- above/below). Returns the meteor's BasePart, or nil if not active.
--- NO deep descendant scan — that's a 20Hz hot path and Effects is huge.
+-- MoonMeshWithParticles = Dio's big meteor explosion. Radius damage — dodge
+-- UNDER and 60 studs horizontally away from its actual position.
+-- Returns the meteor's BasePart, or nil if not active.
+-- Strategy: O(1) direct lookup, then a single-level scan of Effects children
+-- (NOT GetDescendants — that crashes the executor in heavy raids).
 local function getDioSlashPart(): BasePart?
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return nil end
@@ -228,15 +231,25 @@ local function getDioSlashPart(): BasePart?
         return nil
     end
 
-    -- Direct child of Effects
+    -- Direct child of Effects (fast path)
     local m = asPart(effects:FindFirstChild("MoonMeshWithParticles"))
     if m then return m end
+
     -- Inside Slashi (matches the SlashDiagnolParts2 nesting pattern)
     local slashi = effects:FindFirstChild("Slashi")
     if slashi then
         m = asPart(slashi:FindFirstChild("MoonMeshWithParticles"))
         if m then return m end
     end
+
+    -- One-level scan: check each Effects child for a "MoonMeshWithParticles"
+    -- as their immediate child. Each FindFirstChild is O(1), and we iterate
+    -- only top-level Effects children — no recursion.
+    for _, child in effects:GetChildren() do
+        m = asPart(child:FindFirstChild("MoonMeshWithParticles"))
+        if m then return m end
+    end
+
     return nil
 end
 
@@ -280,27 +293,26 @@ local function calculateTargetCFrame(targetRoot: BasePart): CFrame
         dioSlashLogged   = false
     end
 
-    -- If slash has been sustained for 2s+, flee 50 studs horizontally from the meteor
+    -- If slash has been sustained for 2s+, flee 60 studs horizontally AND
+    -- 30 studs below the meteor's actual Y position
     if dioSlashDetected and slashPart and (Clock() - dioSlashTime >= HSLASH_WAIT) then
         if not dioSlashLogged then
-            print("[BZL Hub]: Fleeing from meteor!")
+            print("[BZL Hub]: Fleeing under meteor!")
             dioSlashLogged = true
         end
         local mPos = slashPart.Position
         local char = player.Character
         local hrp  = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
         local pPos = if hrp then hrp.Position else pos
-        -- Direction from meteor to player, flattened to XZ plane
+        -- Direction from meteor to player on XZ plane (so we move further from it, not toward it)
         local awayXZ = VecCreate(pPos.X - mPos.X, 0, pPos.Z - mPos.Z)
         local mag    = VecMag(awayXZ)
         local unit   = if mag > 0.001 then awayXZ / mag else VecCreate(1, 0, 0)
-        -- Land 50 studs from the meteor in that direction, preserving player's Y
-        local safe = VecCreate(
+        return CFrame.new(VecCreate(
             mPos.X + unit.X * HSLASH_FLEE_DIST,
-            pPos.Y,
+            mPos.Y - HSLASH_BELOW_OFS,
             mPos.Z + unit.Z * HSLASH_FLEE_DIST
-        )
-        return CFrame.new(safe)
+        ))
     end
 
     -- Dio ability dodge tracking (flip position)
@@ -667,10 +679,11 @@ if cfgAr.Enabled == true then
                 arSlashDetected = false; arSlashLogged = false
             end
 
-            -- If meteor is armed for 2s+, flee 50 studs horizontally from it
+            -- If meteor is armed for 2s+, flee 60 studs horizontally AND
+            -- 30 studs below the meteor's actual Y position
             if arSlashDetected and slashPart and Clock() - arSlashTime >= HSLASH_WAIT then
                 if not arSlashLogged then
-                    print("[BZL Hub] HEADLESS: Fleeing from meteor!")
+                    print("[BZL Hub] HEADLESS: Fleeing under meteor!")
                     arSlashLogged = true
                 end
                 local mPos = slashPart.Position
@@ -680,7 +693,7 @@ if cfgAr.Enabled == true then
                 local unit   = if mag > 0.001 then awayXZ / mag else VecCreate(1, 0, 0)
                 applyHover(root, CFrame.new(VecCreate(
                     mPos.X + unit.X * HSLASH_FLEE_DIST,
-                    pPos.Y,
+                    mPos.Y - HSLASH_BELOW_OFS,
                     mPos.Z + unit.Z * HSLASH_FLEE_DIST
                 )))
                 continue  -- skip attack while fleeing
