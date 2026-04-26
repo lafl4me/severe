@@ -151,9 +151,8 @@ local dioSlashDetected = false
 local dioSlashTime     = 0
 local dioSlashLogged   = false
 -- Meteor (Dio meteor) dodge tuning
-local HSLASH_WAIT      = 0.3   -- seconds before fleeing (FinishedGrowing gives ~1.85s lead, flee fast)
-local HSLASH_FLEE_DIST = 200   -- horizontal studs from meteor — way out of AoE
-local HSLASH_BELOW_OFS = 80    -- studs below the meteor's Y
+local HSLASH_WAIT = 0.3                              -- seconds before fleeing (FinishedGrowing gives ~1.85s lead)
+local HSLASH_VOID_POS = VecCreate(0, -10000, 0)      -- void coords; nothing reaches here
 
 -- ==========================================
 -- WHITELIST (set for O(1) lookup)
@@ -332,26 +331,14 @@ local function calculateTargetCFrame(targetRoot: BasePart): CFrame
         dioSlashLogged   = false
     end
 
-    -- If slash has been sustained for 2s+, flee 60 studs horizontally AND
-    -- 30 studs below the meteor's actual Y position
+    -- Meteor armed: teleport into the void. The main loop will snap us back
+    -- to the target as soon as getDioSlashPart() returns nil.
     if dioSlashDetected and slashPart and (Clock() - dioSlashTime >= HSLASH_WAIT) then
         if not dioSlashLogged then
-            print("[BZL Hub]: Fleeing under meteor!")
+            print("[BZL Hub]: Teleporting to void!")
             dioSlashLogged = true
         end
-        local mPos = slashPart.Position
-        local char = player.Character
-        local hrp  = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-        local pPos = if hrp then hrp.Position else pos
-        -- Direction from meteor to player on XZ plane (so we move further from it, not toward it)
-        local awayXZ = VecCreate(pPos.X - mPos.X, 0, pPos.Z - mPos.Z)
-        local mag    = VecMag(awayXZ)
-        local unit   = if mag > 0.001 then awayXZ / mag else VecCreate(1, 0, 0)
-        return CFrame.new(VecCreate(
-            mPos.X + unit.X * HSLASH_FLEE_DIST,
-            mPos.Y - HSLASH_BELOW_OFS,
-            mPos.Z + unit.Z * HSLASH_FLEE_DIST
-        ))
+        return CFrame.new(HSLASH_VOID_POS)
     end
 
     -- Dio ability dodge tracking (flip position)
@@ -734,24 +721,15 @@ if cfgAr.Enabled == true then
                 arSlashDetected = false; arSlashLogged = false
             end
 
-            -- If meteor is armed for 2s+, flee 60 studs horizontally AND
-            -- 30 studs below the meteor's actual Y position
+            -- Meteor armed: teleport into the void. Loop will resume normal
+            -- targeting and snap us back as soon as getDioSlashPart() is nil.
             if arSlashDetected and slashPart and Clock() - arSlashTime >= HSLASH_WAIT then
                 if not arSlashLogged then
-                    print("[BZL Hub] HEADLESS: Fleeing under meteor!")
+                    print("[BZL Hub] HEADLESS: Teleporting to void!")
                     arSlashLogged = true
                 end
-                local mPos = slashPart.Position
-                local pPos = root.Position
-                local awayXZ = VecCreate(pPos.X - mPos.X, 0, pPos.Z - mPos.Z)
-                local mag    = VecMag(awayXZ)
-                local unit   = if mag > 0.001 then awayXZ / mag else VecCreate(1, 0, 0)
-                applyHover(root, CFrame.new(VecCreate(
-                    mPos.X + unit.X * HSLASH_FLEE_DIST,
-                    mPos.Y - HSLASH_BELOW_OFS,
-                    mPos.Z + unit.Z * HSLASH_FLEE_DIST
-                )))
-                continue  -- skip attack while fleeing
+                applyHover(root, CFrame.new(HSLASH_VOID_POS))
+                continue  -- skip attack while in void
             end
 
             local mode = arHitPos
