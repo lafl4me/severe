@@ -152,6 +152,7 @@ local dioSlashTime     = 0
 local dioSlashLogged   = false
 -- Meteor (Dio meteor) dodge tuning
 local HSLASH_WAIT = 0.3                              -- seconds before fleeing (FinishedGrowing gives ~1.85s lead)
+local HSLASH_LOCKOUT = 4                             -- stay in void this long after detection (covers charge + impact + safety margin)
 local HSLASH_VOID_POS = VecCreate(0, -10000, 0)      -- void coords; nothing reaches here
 
 -- ==========================================
@@ -315,7 +316,11 @@ local function calculateTargetCFrame(targetRoot: BasePart): CFrame
         mode = currentRandMode
     end
 
-    -- Meteor (meteor) tracking — HIGHEST priority dodge
+    -- Meteor tracking — HIGHEST priority dodge.
+    -- Once detected, we stay in the void for HSLASH_LOCKOUT seconds regardless
+    -- of whether the trigger part is still around. This protects against the
+    -- gap between FinishedGrowing despawning and the actual Explosion landing,
+    -- which would otherwise let the script teleport back into the AoE.
     local slashPart = getDioSlashPart()
     if slashPart then
         if not dioSlashDetected then
@@ -323,17 +328,21 @@ local function calculateTargetCFrame(targetRoot: BasePart): CFrame
             dioSlashTime     = Clock()
             print("[BZL Hub]: Meteor charge detected — fleeing in 0.3s.")
         end
-    else
-        if dioSlashDetected then
-            print("[BZL Hub]: Meteor gone — resuming attack.")
-        end
-        dioSlashDetected = false
-        dioSlashLogged   = false
     end
 
-    -- Meteor armed: teleport into the void. The main loop will snap us back
-    -- to the target as soon as getDioSlashPart() returns nil.
-    if dioSlashDetected and slashPart and (Clock() - dioSlashTime >= HSLASH_WAIT) then
+    local inLockout = dioSlashDetected and (Clock() - dioSlashTime < HSLASH_WAIT + HSLASH_LOCKOUT)
+
+    if not inLockout and dioSlashDetected then
+        -- Lockout expired AND no current trigger — fully reset
+        if not slashPart then
+            print("[BZL Hub]: Meteor lockout expired — resuming attack.")
+            dioSlashDetected = false
+            dioSlashLogged   = false
+        end
+    end
+
+    -- During lockout AND past the initial wait, stay in void
+    if inLockout and (Clock() - dioSlashTime >= HSLASH_WAIT) then
         if not dioSlashLogged then
             print("[BZL Hub]: Teleporting to void!")
             dioSlashLogged = true
@@ -709,21 +718,23 @@ if cfgAr.Enabled == true then
                 arDioDetected = false; arDioLogged = false
             end
 
-            -- Headless-local Meteor (meteor) dodge
+            -- Headless meteor dodge with lockout (see UI mode for rationale).
             local slashPart = getDioSlashPart()
             if slashPart then
                 if not arSlashDetected then
                     arSlashDetected = true; arSlashTime = Clock()
                     print("[BZL Hub] HEADLESS: Meteor charge detected — fleeing in 0.3s.")
                 end
-            else
-                if arSlashDetected then print("[BZL Hub] HEADLESS: Meteor gone.") end
+            end
+
+            local inLockout = arSlashDetected and (Clock() - arSlashTime < HSLASH_WAIT + HSLASH_LOCKOUT)
+
+            if not inLockout and arSlashDetected and not slashPart then
+                print("[BZL Hub] HEADLESS: Meteor lockout expired — resuming.")
                 arSlashDetected = false; arSlashLogged = false
             end
 
-            -- Meteor armed: teleport into the void. Loop will resume normal
-            -- targeting and snap us back as soon as getDioSlashPart() is nil.
-            if arSlashDetected and slashPart and Clock() - arSlashTime >= HSLASH_WAIT then
+            if inLockout and Clock() - arSlashTime >= HSLASH_WAIT then
                 if not arSlashLogged then
                     print("[BZL Hub] HEADLESS: Teleporting to void!")
                     arSlashLogged = true
