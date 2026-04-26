@@ -200,18 +200,28 @@ end
 -- a single timestamp serves all three (Randomized / Target / Conjuration).
 local uiStandMissingSince = 0
 local STAND_DESPAWN_CONFIRM = 1.5  -- seconds of sustained absence
+local STAND_SETTLE = 4             -- post-summon grace period (game-side update lag)
 
--- Decides whether to press summon. Debounces to avoid toggling a still-active
--- stand off when the SummonedStand attribute briefly flickers to "".
+-- Decides whether to press summon. Two-stage debounce:
+--   (1) After pressing summon, the attribute won't update for 200-500ms+.
+--       Skip checks entirely for STAND_SETTLE seconds so we don't see a
+--       stale "absent" reading and re-press (which would TOGGLE OFF the
+--       stand we just summoned).
+--   (2) Once settled, require the attribute to read empty for
+--       STAND_DESPAWN_CONFIRM seconds before pressing.
 local function checkSummonDebounced(char: Model)
+    if Clock() - lastSummonTime < STAND_SETTLE then
+        -- Just summoned — game still processing, don't second-guess
+        uiStandMissingSince = 0
+        return
+    end
     if isStandOut(char) then
         uiStandMissingSince = 0
         return
     end
     if uiStandMissingSince == 0 then
         uiStandMissingSince = Clock()
-    elseif Clock() - uiStandMissingSince >= STAND_DESPAWN_CONFIRM
-           and Clock() - lastSummonTime > 3 then
+    elseif Clock() - uiStandMissingSince >= STAND_DESPAWN_CONFIRM then
         forceSummon()
         uiStandMissingSince = 0
     end
@@ -679,14 +689,27 @@ if cfgAr.Enabled == true then
                 continue
             end
 
-            -- Debounced summon check
-            if isStandOut(c) then
+            -- Debounced summon check.
+            -- KEY INSIGHT: after pressing the summon key, the SummonedStand
+            -- attribute won't update for ~200-500ms (network/game lag). If we
+            -- check too soon, it still reads "missing" and we summon again —
+            -- which TOGGLES the now-active stand off. Solution: after any
+            -- summon press, sit out for STAND_SETTLE seconds before checking
+            -- the attribute at all. Then if still missing after settle, retry.
+            local STAND_SETTLE = 4
+            local timeSinceSummon = Clock() - arLastSummon
+
+            if timeSinceSummon < STAND_SETTLE then
+                -- Just summoned — game still processing, ignore the attribute
+                arStandMissingSince = 0
+            elseif isStandOut(c) then
+                -- Stand is up; happy path
                 arStandMissingSince = 0
             else
+                -- Settle period passed AND stand is genuinely missing
                 if arStandMissingSince == 0 then
                     arStandMissingSince = Clock()
-                elseif Clock() - arStandMissingSince >= STAND_DESPAWN_CONFIRM
-                       and Clock() - arLastSummon > 3 then
+                elseif Clock() - arStandMissingSince >= STAND_DESPAWN_CONFIRM then
                     print("[BZL Hub] HEADLESS: Stand absent ≥1.5s — summoning.")
                     keypress(arSummonKey); task.wait(0.15); keyrelease(arSummonKey)
                     arLastSummon = Clock()
