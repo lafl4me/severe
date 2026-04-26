@@ -125,7 +125,7 @@ local OFFSET_DISTANCE   = Config.OffsetDistance
 local RAND_SWITCH_SPEED = Config.RandomSwitchSpeed
 
 local MIN_Y_LEVEL   = -150
-local MAX_DISTANCE  = 2500
+local MAX_DISTANCE  = 8000  -- covers safe-spot (~-899, 675, -1857) → Dio arena (~0, 5870, 0) ≈ 5588 studs + margin
 local selectedMob   = "None"
 local selectedPlrTarget = Config.TargetPlayer
 
@@ -658,6 +658,11 @@ if cfgAr.Enabled == true then
             local hum  = c:FindFirstChildOfClass("Humanoid")
             if not root or not hum or hum.Health <= 0 then continue end
 
+            -- Keep M1 spamming continuously while alive. We ping here BEFORE
+            -- target search and any continue paths so brief gaps (target dies,
+            -- target out of view, mid-teleport) don't stop the click stream.
+            pingM1()
+
             -- Respawn handling
             if c ~= arLastKnownChar then
                 arLastKnownChar = c
@@ -770,7 +775,6 @@ if cfgAr.Enabled == true then
             elseif mode == "Behind" then applyHover(root, CFrame.lookAt(pos - look * arOffset, pos))
             else applyHover(root, CFrame.lookAt(pos + VecCreate(0, arOffset, 0), pos)) end
 
-            pingM1()  -- keep M1 spamming while we have a target
             if not arAttacking then
                 arAttacking = true
                 task.spawn(function() fireAttack(arAttackKeys); arAttacking = false end)
@@ -1169,6 +1173,7 @@ task.spawn(function()
         local hum  = char and char:FindFirstChildOfClass("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
+        pingM1()  -- keep M1 spamming through brief targeting gaps
         checkSummonDebounced(char)
 
         local lf = Workspace:FindFirstChild("Live")
@@ -1194,7 +1199,6 @@ task.spawn(function()
         if not best then continue end
         applyHover(root, calculateTargetCFrame(best))
 
-        pingM1()
         if not isAttacking then
             isAttacking = true
             task.spawn(function() fireAttack(ATTACK_KEYS); isAttacking = false end)
@@ -1219,6 +1223,7 @@ task.spawn(function()
         local hum  = char and char:FindFirstChildOfClass("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
+        pingM1()  -- keep M1 spamming through brief targeting gaps
         checkSummonDebounced(char)
 
         -- Strip count suffix: "Boss (3)" → "Boss"
@@ -1250,7 +1255,6 @@ task.spawn(function()
         if not best then continue end
         applyHover(root, calculateTargetCFrame(best))
 
-        pingM1()
         if not isAttacking then
             isAttacking = true
             task.spawn(function() fireAttack(ATTACK_KEYS); isAttacking = false end)
@@ -1424,11 +1428,11 @@ task.spawn(function()
             local hum2 = c2 and c2:FindFirstChildOfClass("Humanoid")
             if not r2 or not hum2 or hum2.Health <= 0 then break end
 
+            pingM1()  -- keep M1 spamming through brief targeting gaps
             checkSummonDebounced(c2)
 
             applyHover(r2, calculateTargetCFrame(target.hrp))
 
-            pingM1()
             if not conjAttacking then
                 conjAttacking = true
                 task.spawn(function() fireAttack(ATTACK_KEYS); conjAttacking = false end)
