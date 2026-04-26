@@ -133,13 +133,11 @@ local selectedPlrTarget = Config.TargetPlayer
 local lastSummonTime = 0
 local isAttacking    = false
 
--- M1 spam controller: any farm sets this true when it currently has a valid
--- target and is NOT currently fleeing the meteor. A dedicated thread (started
--- below) clicks M1 continuously while this is true. Decoupling M1 from the
--- ability rotation guarantees we never miss the attack window while waiting
--- for E/R/Z/etc. keys to finish their own micro-waits.
+-- M1 spam: any farm sets m1Engaged=true and the dedicated spammer thread
+-- keeps clicking until a toggle (or kill switch) sets it false. No timestamp
+-- decay — earlier design lost clicks during long task.wait()s in the main
+-- loops (respawn, summon, fireAttack), now M1 runs fully independently.
 local m1Engaged = false
-local m1LastReset = 0  -- if no farm refreshes this within 0.3s, spammer pauses
 
 -- Dio dodge state (shared between UI and headless modes)
 local dioAbilityDetected = false
@@ -231,24 +229,31 @@ local function applyHover(root: BasePart, cf: CFrame)
     root.Velocity = ZERO_VEC
 end
 
--- Helper for farms to register "I have a target right now, please keep clicking"
+-- Helper for farms to declare "I'm currently engaged, keep clicking M1 forever
+-- until I tell you otherwise." Calling this is idempotent — repeated calls
+-- don't reset anything; the spammer just keeps running.
 local function pingM1()
-    m1Engaged   = true
-    m1LastReset = Clock()
+    m1Engaged = true
 end
 
--- M1 spam thread. Runs always; clicks M1 ~12 times/sec while a farm is
--- actively engaged. Auto-pauses 0.3s after the last pingM1() so it stops
--- when no farm is targeting anything (saves cycles, doesn't fire in lobby).
+-- Optional explicit stop (currently unused — farms toggle their own enabled
+-- flags and the periodic refresh from the main loops is enough; if you want
+-- M1 to stop the moment a farm is disabled, call this in the toggle callback).
+local function stopM1()
+    m1Engaged = false
+end
+
+-- M1 spam thread. While m1Engaged is true, clicks M1 ~12 times/sec
+-- INDEPENDENTLY of any other thread's timing — no timestamps, no decay,
+-- no waiting on other code paths. Setting m1Engaged = false stops it.
 task.spawn(function()
     while true do
-        if m1Engaged and Clock() - m1LastReset < 0.3 then
+        if m1Engaged then
             mouse1press()
             task.wait(0.04)
             mouse1release()
             task.wait(0.04)
         else
-            m1Engaged = false
             task.wait(0.1)
         end
     end
@@ -497,6 +502,7 @@ if cfgAr.Enabled == true then
                 else
                     print("[BZL Hub]: Auto Raid PAUSED.")
                     notify("Auto Raid paused!")
+                    stopM1()  -- don't keep clicking while paused
                 end
                 task.wait(0.4)
                 debounce = false
@@ -830,6 +836,7 @@ window:createtoggle(lobbyTab, {
     Callback = function(v)
         isLobbyFarmOn = v
         if v then isMobFarmOn = false; isConjFarmOn = false end
+        if not (isLobbyFarmOn or isMobFarmOn or isConjFarmOn) then stopM1() end
     end
 })
 
@@ -961,6 +968,7 @@ window:createtoggle(mobTab, {
     Callback = function(v)
         isMobFarmOn = v
         if v then isLobbyFarmOn = false; isConjFarmOn = false end
+        if not (isLobbyFarmOn or isMobFarmOn or isConjFarmOn) then stopM1() end
     end
 })
 
@@ -1078,6 +1086,7 @@ window:createtoggle(conjTab, {
     Callback = function(v)
         isConjFarmOn = v
         if v then isLobbyFarmOn = false; isMobFarmOn = false end
+        if not (isLobbyFarmOn or isMobFarmOn or isConjFarmOn) then stopM1() end
     end
 })
 
