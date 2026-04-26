@@ -151,9 +151,9 @@ local dioSlashDetected = false
 local dioSlashTime     = 0
 local dioSlashLogged   = false
 -- Meteor (Dio meteor) dodge tuning
-local HSLASH_WAIT = 0.3                              -- seconds before fleeing (FinishedGrowing gives ~1.85s lead)
-local HSLASH_LOCKOUT = 4                             -- stay in void this long after detection (covers charge + impact + safety margin)
-local HSLASH_VOID_POS = VecCreate(0, -10000, 0)      -- void coords; nothing reaches here
+local HSLASH_WAIT = 0.3                                       -- seconds before fleeing (FinishedGrowing gives ~1.85s lead)
+local HSLASH_LOCKOUT = 4                                      -- stay at safe spot this long after detection (covers charge + impact + safety margin)
+local HSLASH_VOID_POS = VecCreate(-899.70, 675.01, -1856.77)  -- captured safe spot, far from any Dio AoE
 
 -- ==========================================
 -- WHITELIST (set for O(1) lookup)
