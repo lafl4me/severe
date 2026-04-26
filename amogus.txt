@@ -240,12 +240,13 @@ end
 -- window has focus. If Roblox isn't focused (menu open, alt-tabbed, overlay
 -- captured input, etc), our clicks are fired but never reach the game.
 -- isrbxactive() returns true only when Roblox is the focused window, so we
--- gate the spammer on it. This is the root cause of "M1 stops clicking" —
--- the calls were happening, they just weren't landing on Roblox.
+-- gate the spammer on it. 
 task.spawn(function()
     while true do
         if m1Engaged and isrbxactive() then
-            mouse1click()
+            mouse1press()
+            task.wait(0.02)
+            mouse1release()
             task.wait(0.03)
         else
             task.wait(0.1)
