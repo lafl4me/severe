@@ -61,7 +61,11 @@ end
 -- Fires the configured ability keys in sequence. M1 is NOT included — M1 is
 -- spammed continuously by a dedicated background thread so we never miss
 -- a click while waiting for ability keys to finish.
+-- Severe is external: keypress goes through the OS to the focused window. If
+-- Roblox isn't focused, the press lands on whatever IS focused. We bail early
+-- to avoid leaking presses into the menu or other apps.
 local function fireAttack(attackKeys: {number})
+    if not isrbxactive() then return end
     for _, k in attackKeys do
         keypress(k)
         task.wait(0.02)
@@ -232,14 +236,15 @@ local function stopM1()
     m1Engaged = false
 end
 
--- M1 spam thread. While m1Engaged is true, fires mouse1click() as fast as
--- the scheduler allows. Using the atomic click() instead of press/wait/release
--- avoids contention with the ability-rotation thread's keypresses on Severe's
--- input mutex — the previous press→wait→release pattern let key events grab
--- the lock during the gap, causing visible click stalls.
+-- M1 spam thread. Severe is EXTERNAL — input goes through the OS to whichever
+-- window has focus. If Roblox isn't focused (menu open, alt-tabbed, overlay
+-- captured input, etc), our clicks are fired but never reach the game.
+-- isrbxactive() returns true only when Roblox is the focused window, so we
+-- gate the spammer on it. This is the root cause of "M1 stops clicking" —
+-- the calls were happening, they just weren't landing on Roblox.
 task.spawn(function()
     while true do
-        if m1Engaged then
+        if m1Engaged and isrbxactive() then
             mouse1click()
             task.wait(0.03)
         else
