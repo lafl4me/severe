@@ -196,34 +196,13 @@ local function forceSummon()
     lastSummonTime = Clock()
 end
 
--- Shared UI-mode stand-absence tracker. Modules are mutually exclusive so
--- a single timestamp serves all three (Randomized / Target / Conjuration).
-local uiStandMissingSince = 0
-local STAND_DESPAWN_CONFIRM = 1.5  -- seconds of sustained absence
-local STAND_SETTLE = 4             -- post-summon grace period (game-side update lag)
-
--- Decides whether to press summon. Two-stage debounce:
---   (1) After pressing summon, the attribute won't update for 200-500ms+.
---       Skip checks entirely for STAND_SETTLE seconds so we don't see a
---       stale "absent" reading and re-press (which would TOGGLE OFF the
---       stand we just summoned).
---   (2) Once settled, require the attribute to read empty for
---       STAND_DESPAWN_CONFIRM seconds before pressing.
+-- Stand summon helper. Simple as the old script: if stand isn't out AND we
+-- haven't pressed summon in the last 3 seconds, press it. The 3-second
+-- post-press cooldown is what protects against re-pressing during the
+-- attribute-update lag window — no other state needed.
 local function checkSummonDebounced(char: Model)
-    if Clock() - lastSummonTime < STAND_SETTLE then
-        -- Just summoned — game still processing, don't second-guess
-        uiStandMissingSince = 0
-        return
-    end
-    if isStandOut(char) then
-        uiStandMissingSince = 0
-        return
-    end
-    if uiStandMissingSince == 0 then
-        uiStandMissingSince = Clock()
-    elseif Clock() - uiStandMissingSince >= STAND_DESPAWN_CONFIRM then
+    if not isStandOut(char) and Clock() - lastSummonTime > 3 then
         forceSummon()
-        uiStandMissingSince = 0
     end
 end
 
@@ -659,17 +638,11 @@ if cfgAr.Enabled == true then
 
     -- Main attack loop
     task.spawn(function()
-        -- Debounce stand absence: only summon if the SummonedStand attribute
-        -- stays cleared for STAND_DESPAWN_CONFIRM seconds. The attribute
-        -- flickers to "" during normal play; if we summon on the flicker,
-        -- the press toggles the still-active stand OFF.
-        local STAND_DESPAWN_CONFIRM = 1.5
-        local arStandMissingSince = 0  -- 0 = stand present; >0 = first-missing timestamp
         while true do
             task.wait(0.05)
             if not arActive then continue end
             local c = player.Character
-            if not c then arStandMissingSince = 0; continue end
+            if not c then continue end
             local root = c:FindFirstChild("HumanoidRootPart") :: BasePart?
             local hum  = c:FindFirstChildOfClass("Humanoid")
             if not root or not hum or hum.Health <= 0 then continue end
@@ -682,39 +655,19 @@ if cfgAr.Enabled == true then
             -- Respawn handling
             if c ~= arLastKnownChar then
                 arLastKnownChar = c
-                arStandMissingSince = 0
                 task.wait(2.5)
                 keypress(arSummonKey); task.wait(0.15); keyrelease(arSummonKey)
                 arLastSummon = Clock()
                 continue
             end
 
-            -- Debounced summon check.
-            -- KEY INSIGHT: after pressing the summon key, the SummonedStand
-            -- attribute won't update for ~200-500ms (network/game lag). If we
-            -- check too soon, it still reads "missing" and we summon again —
-            -- which TOGGLES the now-active stand off. Solution: after any
-            -- summon press, sit out for STAND_SETTLE seconds before checking
-            -- the attribute at all. Then if still missing after settle, retry.
-            local STAND_SETTLE = 4
-            local timeSinceSummon = Clock() - arLastSummon
-
-            if timeSinceSummon < STAND_SETTLE then
-                -- Just summoned — game still processing, ignore the attribute
-                arStandMissingSince = 0
-            elseif isStandOut(c) then
-                -- Stand is up; happy path
-                arStandMissingSince = 0
-            else
-                -- Settle period passed AND stand is genuinely missing
-                if arStandMissingSince == 0 then
-                    arStandMissingSince = Clock()
-                elseif Clock() - arStandMissingSince >= STAND_DESPAWN_CONFIRM then
-                    print("[BZL Hub] HEADLESS: Stand absent ≥1.5s — summoning.")
-                    keypress(arSummonKey); task.wait(0.15); keyrelease(arSummonKey)
-                    arLastSummon = Clock()
-                    arStandMissingSince = 0
-                end
+            -- Simple summon (matches the old working script): if stand isn't
+            -- out AND we haven't pressed summon in 3+ seconds, press it.
+            -- The 3s cooldown is the entire debounce — covers the attribute
+            -- update lag window and prevents re-pressing on flickers.
+            if not isStandOut(c) and Clock() - arLastSummon > 3 then
+                keypress(arSummonKey); task.wait(0.15); keyrelease(arSummonKey)
+                arLastSummon = Clock()
             end
 
             local lf = Workspace:FindFirstChild("Live")
