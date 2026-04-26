@@ -151,7 +151,7 @@ local dioSlashDetected = false
 local dioSlashTime     = 0
 local dioSlashLogged   = false
 -- Meteor (Dio meteor) dodge tuning
-local HSLASH_WAIT      = 2     -- seconds armed before fleeing
+local HSLASH_WAIT      = 0.3   -- seconds before fleeing (FinishedGrowing gives ~1.85s lead, flee fast)
 local HSLASH_FLEE_DIST = 60    -- horizontal studs from meteor
 local HSLASH_BELOW_OFS = 30    -- studs below the meteor's Y
 
@@ -262,40 +262,34 @@ local function checkDioAbility(): boolean
     return slashi ~= nil and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") ~= nil
 end
 
--- Dio's meteor attack drops "Meteor" parts from the sky into Workspace.Effects.
--- Anubis stand creates parts with the same name at ground level, so we filter
--- to ONLY meteors that are above the player (real meteors drop from ~30 studs
--- up; Anubis particles spawn near the player's feet). Of the eligible meteors,
--- we pick the closest one.
-local METEOR_MIN_HEIGHT_ABOVE_PLAYER = 8  -- studs; Anubis particles typically <5 above ground
-
+-- Dio's meteor attack signature, confirmed via debug:
+--   1. "FinishedGrowing" Part spawns ~36 studs above player (the meteor
+--      charging in the sky) — this is our early-warning trigger.
+--   2. ~1.85s later, an "Explosion" Part with size 70x0.5x70 lands at the
+--      player's position dealing 16+ damage in a flat disc AoE.
+-- We detect FinishedGrowing as the dodge signal because it gives us enough
+-- lead time to reposition before damage applies.
 local function getDioSlashPart(): BasePart?
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return nil end
 
-    local char = player.Character
-    local hrp  = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-    if not hrp then return nil end  -- without player ref we can't filter
-    local myPos = hrp.Position
+    -- FinishedGrowing is the charge-up — fire on this for early warning
+    local fg = effects:FindFirstChild("FinishedGrowing")
+    if fg and fg:IsA("BasePart") then return fg :: BasePart end
 
-    local best: BasePart? = nil
-    local bestDist = MathHuge
-
+    -- Fallback: the giant Explosion disc (Size 70x0.5x70 distinguishes it
+    -- from normal hit explosions which are ~9x0.1x9 or 3x3x3). If we miss
+    -- the charge-up window, at least flee from the active blast.
     for _, c in effects:GetChildren() do
-        if c.Name == "Meteor" and c:IsA("BasePart") then
-            local part = c :: BasePart
-            -- Must be ABOVE the player by a meaningful amount (skips Anubis junk)
-            if part.Position.Y - myPos.Y >= METEOR_MIN_HEIGHT_ABOVE_PLAYER then
-                local d = VecMag(part.Position - myPos)
-                if d < bestDist then
-                    bestDist = d
-                    best = part
-                end
+        if c.Name == "Explosion" and c:IsA("BasePart") then
+            local p = c :: BasePart
+            if p.Size.X >= 50 and p.Size.Z >= 50 then
+                return p
             end
         end
     end
 
-    return best
+    return nil
 end
 
 -- Returns the CFrame the player's HRP should be set to for attacking targetRoot.
@@ -328,7 +322,7 @@ local function calculateTargetCFrame(targetRoot: BasePart): CFrame
         if not dioSlashDetected then
             dioSlashDetected = true
             dioSlashTime     = Clock()
-            print("[BZL Hub]: Meteor detected — waiting 2s before fleeing.")
+            print("[BZL Hub]: Meteor charge detected — fleeing in 0.3s.")
         end
     else
         if dioSlashDetected then
@@ -733,7 +727,7 @@ if cfgAr.Enabled == true then
             if slashPart then
                 if not arSlashDetected then
                     arSlashDetected = true; arSlashTime = Clock()
-                    print("[BZL Hub] HEADLESS: Meteor detected — waiting 2s.")
+                    print("[BZL Hub] HEADLESS: Meteor charge detected — fleeing in 0.3s.")
                 end
             else
                 if arSlashDetected then print("[BZL Hub] HEADLESS: Meteor gone.") end
