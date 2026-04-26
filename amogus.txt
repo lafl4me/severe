@@ -232,16 +232,16 @@ local function stopM1()
     m1Engaged = false
 end
 
--- M1 spam thread. While m1Engaged is true, clicks M1 ~12 times/sec
--- INDEPENDENTLY of any other thread's timing — no timestamps, no decay,
--- no waiting on other code paths. Setting m1Engaged = false stops it.
+-- M1 spam thread. While m1Engaged is true, fires mouse1click() as fast as
+-- the scheduler allows. Using the atomic click() instead of press/wait/release
+-- avoids contention with the ability-rotation thread's keypresses on Severe's
+-- input mutex — the previous press→wait→release pattern let key events grab
+-- the lock during the gap, causing visible click stalls.
 task.spawn(function()
     while true do
         if m1Engaged then
-            mouse1press()
-            task.wait(0.04)
-            mouse1release()
-            task.wait(0.04)
+            mouse1click()
+            task.wait(0.03)
         else
             task.wait(0.1)
         end
