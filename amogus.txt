@@ -152,8 +152,8 @@ local dioSlashTime     = 0
 local dioSlashLogged   = false
 -- Meteor (Dio meteor) dodge tuning
 local HSLASH_WAIT      = 0.3   -- seconds before fleeing (FinishedGrowing gives ~1.85s lead, flee fast)
-local HSLASH_FLEE_DIST = 60    -- horizontal studs from meteor
-local HSLASH_BELOW_OFS = 30    -- studs below the meteor's Y
+local HSLASH_FLEE_DIST = 200   -- horizontal studs from meteor — way out of AoE
+local HSLASH_BELOW_OFS = 80    -- studs below the meteor's Y
 
 -- ==========================================
 -- WHITELIST (set for O(1) lookup)
