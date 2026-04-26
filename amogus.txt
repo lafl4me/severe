@@ -58,13 +58,10 @@ local function normalizePosition(s: any): string
     return "Above"
 end
 
--- Fires an attack combo: M1 then all configured ability keys.
--- Constant micro-wait between keys (no randomization) to avoid hot-path churn.
+-- Fires the configured ability keys in sequence. M1 is NOT included — M1 is
+-- spammed continuously by a dedicated background thread so we never miss
+-- a click while waiting for ability keys to finish.
 local function fireAttack(attackKeys: {number})
-    if #attackKeys == 0 then return end
-    mouse1press()
-    task.wait(0.05)
-    mouse1release()
     for _, k in attackKeys do
         keypress(k)
         task.wait(0.02)
@@ -135,6 +132,14 @@ local selectedPlrTarget = Config.TargetPlayer
 -- Summon / attack shared guards
 local lastSummonTime = 0
 local isAttacking    = false
+
+-- M1 spam controller: any farm sets this true when it currently has a valid
+-- target and is NOT currently fleeing the meteor. A dedicated thread (started
+-- below) clicks M1 continuously while this is true. Decoupling M1 from the
+-- ability rotation guarantees we never miss the attack window while waiting
+-- for E/R/Z/etc. keys to finish their own micro-waits.
+local m1Engaged = false
+local m1LastReset = 0  -- if no farm refreshes this within 0.3s, spammer pauses
 
 -- Dio dodge state (shared between UI and headless modes)
 local dioAbilityDetected = false
@@ -226,6 +231,29 @@ local function applyHover(root: BasePart, cf: CFrame)
     root.Velocity = ZERO_VEC
 end
 
+-- Helper for farms to register "I have a target right now, please keep clicking"
+local function pingM1()
+    m1Engaged   = true
+    m1LastReset = Clock()
+end
+
+-- M1 spam thread. Runs always; clicks M1 ~12 times/sec while a farm is
+-- actively engaged. Auto-pauses 0.3s after the last pingM1() so it stops
+-- when no farm is targeting anything (saves cycles, doesn't fire in lobby).
+task.spawn(function()
+    while true do
+        if m1Engaged and Clock() - m1LastReset < 0.3 then
+            mouse1press()
+            task.wait(0.04)
+            mouse1release()
+            task.wait(0.04)
+        else
+            m1Engaged = false
+            task.wait(0.1)
+        end
+    end
+end)
+
 local function checkDioAbility(): boolean
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return false end
@@ -234,17 +262,21 @@ local function checkDioAbility(): boolean
     return slashi ~= nil and slashi:FindFirstChild("SlashDiagnolParts2 (Emit)") ~= nil
 end
 
--- Dio's meteor attack drops one or more parts named "Meteor" into
--- Workspace.Effects (confirmed via debug capture). When several spawn
--- simultaneously we want to flee from the CLOSEST one to the player.
+-- Dio's meteor attack drops "Meteor" parts from the sky into Workspace.Effects.
+-- Anubis stand creates parts with the same name at ground level, so we filter
+-- to ONLY meteors that are above the player (real meteors drop from ~30 studs
+-- up; Anubis particles spawn near the player's feet). Of the eligible meteors,
+-- we pick the closest one.
+local METEOR_MIN_HEIGHT_ABOVE_PLAYER = 8  -- studs; Anubis particles typically <5 above ground
+
 local function getDioSlashPart(): BasePart?
     local effects = Workspace:FindFirstChild("Effects")
     if not effects then return nil end
 
-    -- Need player position to pick the closest meteor of several
     local char = player.Character
     local hrp  = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-    local myPos = if hrp then hrp.Position else nil
+    if not hrp then return nil end  -- without player ref we can't filter
+    local myPos = hrp.Position
 
     local best: BasePart? = nil
     local bestDist = MathHuge
@@ -252,14 +284,13 @@ local function getDioSlashPart(): BasePart?
     for _, c in effects:GetChildren() do
         if c.Name == "Meteor" and c:IsA("BasePart") then
             local part = c :: BasePart
-            if myPos then
+            -- Must be ABOVE the player by a meaningful amount (skips Anubis junk)
+            if part.Position.Y - myPos.Y >= METEOR_MIN_HEIGHT_ABOVE_PLAYER then
                 local d = VecMag(part.Position - myPos)
                 if d < bestDist then
                     bestDist = d
                     best = part
                 end
-            else
-                return part  -- no player ref, just return first match
             end
         end
     end
@@ -756,6 +787,7 @@ if cfgAr.Enabled == true then
             elseif mode == "Behind" then applyHover(root, CFrame.lookAt(pos - look * arOffset, pos))
             else applyHover(root, CFrame.lookAt(pos + VecCreate(0, arOffset, 0), pos)) end
 
+            pingM1()  -- keep M1 spamming while we have a target
             if not arAttacking then
                 arAttacking = true
                 task.spawn(function() fireAttack(arAttackKeys); arAttacking = false end)
@@ -1179,6 +1211,7 @@ task.spawn(function()
         if not best then continue end
         applyHover(root, calculateTargetCFrame(best))
 
+        pingM1()
         if not isAttacking then
             isAttacking = true
             task.spawn(function() fireAttack(ATTACK_KEYS); isAttacking = false end)
@@ -1234,6 +1267,7 @@ task.spawn(function()
         if not best then continue end
         applyHover(root, calculateTargetCFrame(best))
 
+        pingM1()
         if not isAttacking then
             isAttacking = true
             task.spawn(function() fireAttack(ATTACK_KEYS); isAttacking = false end)
@@ -1411,6 +1445,7 @@ task.spawn(function()
 
             applyHover(r2, calculateTargetCFrame(target.hrp))
 
+            pingM1()
             if not conjAttacking then
                 conjAttacking = true
                 task.spawn(function() fireAttack(ATTACK_KEYS); conjAttacking = false end)
